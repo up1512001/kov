@@ -1,0 +1,53 @@
+# .kovignore — files that kov should never read or modify.
+# Works like .gitignore. Protects sensitive files from AI access.
+
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+
+# API keys and tokens
+*secret*
+*credential*
+*token*
+
+# SSH
+.ssh/
+id_rsa*
+id_ed25519*
+
+# Cloud credentials
+.aws/
+.gcp/
+.azure/
+service-account*.json
+
+# Database
+*.sqlite
+*.db
+
+# Binary and build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE settings (usually irrelevant)
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies (too large for context)
+node_modules/
+vendor/
+.venv/
+__pycache__/

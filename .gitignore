@@ -1,0 +1,44 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+tmp/
+dist/
+coverage.out
+coverage.html
+*.prof
+trace.out
+build-errors.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.*
+
+# Don't commit user data
+*.sqlite
+*.db
+
+# Design docs (keep in separate location)
+ai_tool_ideas_research.md
+implementation_plan.md
+kov_architecture.md
+kov_competitive_intel.md
+kov_competitive_research_2026.md
+kov_architecture_v2.md
+kov_harness.md
+task.md

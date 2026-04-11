@@ -1,0 +1,116 @@
+# Kov Development Tasks
+# Usage: task <command>
+# Requires: https://taskfile.dev
+
+version: '3'
+
+vars:
+  BINARY: kov
+  BUILD_DIR: ./bin
+  MAIN: ./cmd/kov
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  setup:
+    desc: Install development dependencies
+    cmds:
+      - go install github.com/air-verse/air@latest
+      - go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - go mod download
+      - echo "✓ Development environment ready"
+
+  build:
+    desc: Build the kov binary
+    cmds:
+      - go build -o {{.BUILD_DIR}}/{{.BINARY}} {{.MAIN}}
+    sources:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+    generates:
+      - '{{.BUILD_DIR}}/{{.BINARY}}'
+
+  dev:
+    desc: Run with hot reload (air)
+    cmds:
+      - air
+
+  run:
+    desc: Build and run kov with args
+    cmds:
+      - go run {{.MAIN}} {{.CLI_ARGS}}
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test -race -count=1 ./...
+
+  test-cover:
+    desc: Run tests with coverage
+    cmds:
+      - go test -race -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "✓ Coverage report: coverage.html"
+
+  test-bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./internal/resilience/... ./internal/bus/... ./internal/db/...
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format all Go files
+    cmds:
+      - gofmt -w .
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+      - rm -f coverage.out coverage.html
+      - rm -f cpu.prof mem.prof trace.out
+
+  perf:
+    desc: Benchmark cold start time
+    cmds:
+      - task build
+      - hyperfine --warmup 3 --runs 50 '{{.BUILD_DIR}}/{{.BINARY}} version'
+
+  perf-mem:
+    desc: Profile memory usage
+    cmds:
+      - go run {{.MAIN}} --profile mem "test prompt"
+      - go tool pprof -http=:8080 mem.prof
+
+  sqlc:
+    desc: Generate SQL query code
+    cmds:
+      - sqlc generate
+
+  check:
+    desc: Run all checks (fmt, vet, lint, test)
+    cmds:
+      - task fmt
+      - task vet
+      - task lint
+      - task test
+
+  release-dry:
+    desc: Dry run GoReleaser
+    cmds:
+      - goreleaser release --snapshot --clean

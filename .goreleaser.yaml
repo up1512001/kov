@@ -1,0 +1,72 @@
+project_name: kov
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: kov
+    main: ./cmd/kov
+    binary: kov
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+
+brews:
+  - name: kov
+    repository:
+      owner: utsavkovy
+      name: homebrew-tap
+    homepage: "https://trykov.dev"
+    description: "Indestructible AI coding in your terminal"
+    license: MIT
+    install: |
+      bin.install "kov"
+    test: |
+      system "#{bin}/kov", "version"
+
+nfpms:
+  - id: kov
+    package_name: kov
+    homepage: "https://trykov.dev"
+    description: "Indestructible AI coding in your terminal"
+    maintainer: "Utsav <hello@trykov.dev>"
+    license: MIT
+    formats:
+      - deb
+      - rpm

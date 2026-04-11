@@ -1,0 +1,49 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gosimple
+    - gocritic
+    - revive
+    - misspell
+    - gofmt
+    - goimports
+    - bodyclose
+    - nilerr
+    - exhaustive
+
+linters-settings:
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - "checkPrivateReceivers"
+      - name: unused-parameter
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # too noisy for initial development
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocritic
+    - path: internal/testutil/
+      linters:
+        - errcheck
+  max-issues-per-linter: 50
+  max-same-issues: 3

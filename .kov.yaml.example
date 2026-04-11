@@ -1,0 +1,88 @@
+# Example project configuration for kov.
+# Copy this to .kov.yaml in your project root.
+# All settings are optional — kov works with just an API key env var.
+
+# Default model and provider
+model: claude-sonnet-4-20250514
+provider: anthropic
+
+# Provider configuration
+# API keys can be set here or via environment variables (recommended).
+providers:
+  anthropic: {}        # Uses ANTHROPIC_API_KEY env var
+  openai: {}           # Uses OPENAI_API_KEY env var
+  google: {}           # Uses GEMINI_API_KEY env var
+  ollama:
+    url: http://localhost:11434
+    model: qwen3:8b
+
+# Per-mode model overrides
+modes:
+  code:
+    model: claude-sonnet-4-20250514
+    thinkBudget: medium
+  plan:
+    model: claude-sonnet-4-20250514
+    thinkBudget: high
+  think:
+    model: claude-sonnet-4-20250514
+    thinkBudget: maximum
+  fast:
+    model: claude-sonnet-4-20250514
+    thinkBudget: low
+  architect:
+    planModel: claude-sonnet-4-20250514
+    editModel: claude-sonnet-4-20250514
+
+# Resilience engine
+resilience:
+  checkpoint: true
+  failover: true
+  fallbackProvider: ollama
+  maxRetries: 3
+  backoff:
+    initial: 2s
+    max: 60s
+    jitter: true
+  pauseOnAuthError: true
+  loopDetection:
+    enabled: true
+    threshold: 3
+
+# Automatic verification after each sub-task
+verify:
+  enabled: true
+  command: ""           # empty = auto-detect from project files
+  afterEachTask: true
+  timeout: 120s
+  maxFixRetries: 2
+
+# Permission model
+permissions: confirm     # confirm | smart | yolo | chat
+
+# Git integration
+git:
+  autoCommit: true
+  commitPrefix: "[kov]"
+  snapshotBeforeEdit: true
+
+# Cost budget
+cost:
+  budgetPerSession: 0    # USD, 0 = unlimited
+  warnAt: 5.00
+
+# MCP servers (v0.2)
+# mcpServers:
+#   filesystem:
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+
+# Pipe mode
+pipe:
+  outputFormat: json     # json | text
+
+# UI
+ui:
+  theme: dark
+  showCost: true
+  showTaskProgress: true
