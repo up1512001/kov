@@ -217,3 +217,32 @@ type PermissionRequired struct {
 }
 
 func (PermissionRequired) eventMarker() {}
+
+// --- State Machine Events ---
+
+// StateChanged is emitted on every FSM state transition.
+type StateChanged struct {
+	SessionID string
+	From      string
+	To        string
+}
+
+func (StateChanged) eventMarker() {}
+
+// CostUpdate is emitted after each API call with cost delta.
+type CostUpdate struct {
+	SessionID string
+	Total     float64
+	Delta     float64
+}
+
+func (CostUpdate) eventMarker() {}
+
+// CostWarning is emitted when spending approaches the budget limit.
+type CostWarning struct {
+	SessionID string
+	Total     float64
+	Budget    float64
+}
+
+func (CostWarning) eventMarker() {}
