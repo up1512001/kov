@@ -17,6 +17,7 @@ import (
 	"github.com/utsavkovy/kov/internal/db"
 	"github.com/utsavkovy/kov/internal/provider"
 	"github.com/utsavkovy/kov/internal/resilience"
+	"github.com/utsavkovy/kov/internal/session"
 	"github.com/utsavkovy/kov/internal/tools"
 )
 
@@ -211,6 +212,7 @@ func (a *App) runRoot(cmd *cobra.Command, args []string) error {
 	agentCfg.Permissions = cfg.Permissions
 	agentCfg.VerifyEnabled = cfg.Verify.Enabled
 	agentCfg.VerifyCommand = cfg.Verify.Command
+	agentCfg.ProjectDir = projectDir
 
 	ag := agent.New(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg)
 
@@ -261,13 +263,60 @@ session by ID. Kov recovers the exact state from its checkpoint
 and continues from where it left off.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				fmt.Printf("♻️  Resuming session: %s\n", args[0])
-			} else {
-				fmt.Println("♻️  Resuming last interrupted session...")
+			cfg, err := a.config.Get()
+			if err != nil {
+				return err
 			}
-			// TODO: Implement resume (Day 11)
-			fmt.Println("⚡ Resume not yet implemented — coming Day 11")
+
+			database, err := db.Open(cfg.DataDir+"/kov.db", a.logger)
+			if err != nil {
+				return fmt.Errorf("opening database: %w", err)
+			}
+			defer database.Close()
+
+			mgr := session.NewManager(database, a.bus, a.logger, "")
+
+			var sessionID string
+			if len(args) > 0 {
+				sessionID = args[0]
+				fmt.Printf("♻️  Resuming session: %s\n", sessionID)
+			} else {
+				last, err := mgr.GetLastInterrupted(cmd.Context())
+				if err != nil {
+					fmt.Println("No interrupted sessions found.")
+					return nil
+				}
+				sessionID = last.ID
+				fmt.Printf("♻️  Resuming session: %s (%s)\n", sessionID[:8], last.Prompt)
+			}
+
+			providers := buildProviders(cfg)
+			router := provider.NewRouter(providers, a.bus, a.logger, provider.DefaultRouterConfig())
+			defer router.Close()
+
+			projectDir, _ := os.Getwd()
+			toolRegistry := tools.DefaultRegistry(projectDir)
+
+			agentCfg := agent.DefaultAgentConfig()
+			agentCfg.Permissions = cfg.Permissions
+
+			err = mgr.Resume(cmd.Context(), sessionID, router, toolRegistry, agentCfg, session.AgentCallbacks{
+				OnPermission: func(name, desc string) bool {
+					fmt.Printf("🔐 Allow %s? [y/N] ", desc)
+					var r string
+					fmt.Scanln(&r)
+					return strings.ToLower(r) == "y"
+				},
+				OnToken:  func(t string) { fmt.Print(t) },
+				OnStatus: func(s string) { fmt.Println(s) },
+			})
+			if err != nil {
+				fmt.Printf("\n❌ %s\n", err)
+				return err
+			}
+
+			sessionCost, _ := database.GetSessionCost(cmd.Context(), sessionID)
+			fmt.Printf("\n✅ Resumed session complete (cost: $%.4f)\n", sessionCost)
 			return nil
 		},
 	}
@@ -279,11 +328,76 @@ func (a *App) buildSessionsCmd() *cobra.Command {
 		Use:   "sessions",
 		Short: "List and manage sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO: List sessions from SQLite (Day 11)
-			fmt.Println("📋 Sessions list not yet implemented — coming Day 11")
+			cfg, err := a.config.Get()
+			if err != nil {
+				return err
+			}
+
+			database, err := db.Open(cfg.DataDir+"/kov.db", a.logger)
+			if err != nil {
+				return fmt.Errorf("opening database: %w", err)
+			}
+			defer database.Close()
+
+			mgr := session.NewManager(database, a.bus, a.logger, "")
+			sessions, err := mgr.List(cmd.Context(), 20)
+			if err != nil {
+				return err
+			}
+
+			if len(sessions) == 0 {
+				fmt.Println("No sessions found. Start one with: kov \"your prompt\"")
+				return nil
+			}
+
+			fmt.Printf("%-8s  %-8s  %-10s  %-6s  %s\n", "ID", "MODE", "STATE", "COST", "PROMPT")
+			fmt.Println(strings.Repeat("─", 70))
+			for _, s := range sessions {
+				prompt := s.Prompt
+				if len(prompt) > 40 {
+					prompt = prompt[:37] + "..."
+				}
+				stateEmoji := "⚪"
+				switch s.State {
+				case "done":
+					stateEmoji = "✅"
+				case "executing", "planning", "verifying":
+					stateEmoji = "🔄"
+				case "error_wait", "paused":
+					stateEmoji = "⏸️"
+				}
+				fmt.Printf("%-8s  %-8s  %s %-8s  $%.2f  %s\n",
+					s.ID[:8], s.Mode, stateEmoji, s.State, s.Cost, prompt)
+			}
 			return nil
 		},
 	}
+
+	// Add delete subcommand
+	cmd.AddCommand(&cobra.Command{
+		Use:   "delete [session-id]",
+		Short: "Delete a session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.config.Get()
+			if err != nil {
+				return err
+			}
+			database, err := db.Open(cfg.DataDir+"/kov.db", a.logger)
+			if err != nil {
+				return err
+			}
+			defer database.Close()
+
+			mgr := session.NewManager(database, a.bus, a.logger, "")
+			if err := mgr.Delete(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("🗑️  Session %s deleted\n", args[0])
+			return nil
+		},
+	})
+
 	return cmd
 }
 

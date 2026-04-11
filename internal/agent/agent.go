@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/utsavkovy/kov/internal/bus"
+	kovctx "github.com/utsavkovy/kov/internal/context"
 	"github.com/utsavkovy/kov/internal/db"
 	"github.com/utsavkovy/kov/internal/provider"
 	"github.com/utsavkovy/kov/internal/resilience"
@@ -48,6 +49,7 @@ type AgentConfig struct {
 	Temperature    float64
 	ThinkingBudget int
 	Permissions    string // confirm, smart, yolo, chat
+	ProjectDir     string // project root directory
 	VerifyEnabled  bool
 	VerifyCommand  string
 	VerifyTimeout  time.Duration
@@ -415,6 +417,17 @@ Rules:
 - Run tests/lints after making changes when a verify command is available
 - Explain what you're doing and why before making changes
 - If something fails, analyze the error and try a different approach`
+
+	// Add project context (KOV.md, repo map)
+	if a.config.ProjectDir != "" {
+		projCtx, err := kovctx.LoadProjectContext(a.config.ProjectDir)
+		if err == nil {
+			ctxStr := projCtx.ToSystemContext()
+			if ctxStr != "" {
+				base += "\n\n" + ctxStr
+			}
+		}
+	}
 
 	switch a.config.Mode {
 	case "plan":
