@@ -67,3 +67,62 @@ func TestRequest_ParseJSON(t *testing.T) {
 		t.Errorf("expected 'fast', got %s", req.Mode)
 	}
 }
+
+func TestRequest_WithOptions(t *testing.T) {
+	input := `{"prompt":"test","options":{"budget":"5.0","verify":"go test"}}`
+	var req Request
+	if err := json.Unmarshal([]byte(input), &req); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if req.Options["budget"] != "5.0" {
+		t.Errorf("expected budget option '5.0', got %q", req.Options["budget"])
+	}
+}
+
+func TestRequest_EmptyFields(t *testing.T) {
+	var req Request
+	json.Unmarshal([]byte(`{}`), &req)
+	if req.Prompt != "" {
+		t.Error("expected empty prompt")
+	}
+	if req.Mode != "" {
+		t.Error("expected empty mode")
+	}
+}
+
+func TestResponse_EmptyFilesEdited(t *testing.T) {
+	resp := &Response{
+		Success: true,
+		Content: "No changes needed",
+	}
+
+	data, _ := json.Marshal(resp)
+	var parsed Response
+	json.Unmarshal(data, &parsed)
+
+	if parsed.FilesEdited != nil {
+		t.Error("expected nil files_edited when empty")
+	}
+}
+
+func TestResponse_RoundTrip(t *testing.T) {
+	original := &Response{
+		Success:     true,
+		Content:     "Implemented caching layer",
+		ToolCalls:   7,
+		Cost:        0.1234,
+		Model:       "gpt-4o",
+		FilesEdited: []string{"cache.go", "cache_test.go", "handler.go"},
+	}
+
+	data, _ := json.Marshal(original)
+	var decoded Response
+	json.Unmarshal(data, &decoded)
+
+	if decoded.Cost != original.Cost {
+		t.Errorf("cost mismatch: %f != %f", decoded.Cost, original.Cost)
+	}
+	if len(decoded.FilesEdited) != len(original.FilesEdited) {
+		t.Errorf("files count mismatch: %d != %d", len(decoded.FilesEdited), len(original.FilesEdited))
+	}
+}
