@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/utsavkovy/kov/internal/bus"
-	"github.com/utsavkovy/kov/internal/db"
+	"github.com/up1512001/kov/internal/bus"
+	"github.com/up1512001/kov/internal/db"
 )
 
 // State represents a session's current state in the FSM.

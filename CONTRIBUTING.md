@@ -6,7 +6,7 @@ We love contributions! Here's how to get started.
 
 ```bash
 # Clone the repo
-git clone https://github.com/utsavkovy/kov.git
+git clone https://github.com/up1512001/kov.git
 cd kov
 
 # Install dependencies

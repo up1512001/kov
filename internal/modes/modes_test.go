@@ -3,7 +3,7 @@ package modes
 import (
 	"testing"
 
-	"github.com/utsavkovy/kov/internal/config"
+	"github.com/up1512001/kov/internal/config"
 )
 
 func TestResolve_DefaultCode(t *testing.T) {

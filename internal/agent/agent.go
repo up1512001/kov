@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/utsavkovy/kov/internal/bus"
-	kovctx "github.com/utsavkovy/kov/internal/context"
-	"github.com/utsavkovy/kov/internal/db"
-	"github.com/utsavkovy/kov/internal/provider"
-	"github.com/utsavkovy/kov/internal/resilience"
-	"github.com/utsavkovy/kov/internal/tools"
+	"github.com/up1512001/kov/internal/bus"
+	kovctx "github.com/up1512001/kov/internal/context"
+	"github.com/up1512001/kov/internal/db"
+	"github.com/up1512001/kov/internal/provider"
+	"github.com/up1512001/kov/internal/resilience"
+	"github.com/up1512001/kov/internal/tools"
 )
 
 // Agent runs the agentic coding loop for a session.

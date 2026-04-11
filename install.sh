@@ -3,7 +3,7 @@
 # Usage: curl -fsSL trykov.dev/install.sh | sh
 set -e
 
-REPO="utsavkovy/kov"
+REPO="up1512001/kov"
 BINARY="kov"
 INSTALL_DIR="/usr/local/bin"
 

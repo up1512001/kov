@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/utsavkovy/kov/internal/config"
-	"github.com/utsavkovy/kov/internal/provider"
+	"github.com/up1512001/kov/internal/config"
+	"github.com/up1512001/kov/internal/provider"
 )
 
 // buildProviders creates providers from config, in failover order.

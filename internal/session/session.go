@@ -8,12 +8,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/utsavkovy/kov/internal/agent"
-	"github.com/utsavkovy/kov/internal/bus"
-	"github.com/utsavkovy/kov/internal/db"
-	"github.com/utsavkovy/kov/internal/provider"
-	"github.com/utsavkovy/kov/internal/resilience"
-	"github.com/utsavkovy/kov/internal/tools"
+	"github.com/up1512001/kov/internal/agent"
+	"github.com/up1512001/kov/internal/bus"
+	"github.com/up1512001/kov/internal/db"
+	"github.com/up1512001/kov/internal/provider"
+	"github.com/up1512001/kov/internal/resilience"
+	"github.com/up1512001/kov/internal/tools"
 )
 
 // Manager handles session operations.

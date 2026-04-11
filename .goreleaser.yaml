@@ -50,7 +50,7 @@ changelog:
 brews:
   - name: kov
     repository:
-      owner: utsavkovy
+      owner: up1512001
       name: homebrew-tap
     homepage: "https://trykov.dev"
     description: "Indestructible AI coding in your terminal"

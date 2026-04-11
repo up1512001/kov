@@ -11,14 +11,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/utsavkovy/kov/internal/agent"
-	"github.com/utsavkovy/kov/internal/bus"
-	"github.com/utsavkovy/kov/internal/config"
-	"github.com/utsavkovy/kov/internal/db"
-	"github.com/utsavkovy/kov/internal/provider"
-	"github.com/utsavkovy/kov/internal/resilience"
-	"github.com/utsavkovy/kov/internal/session"
-	"github.com/utsavkovy/kov/internal/tools"
+	"github.com/up1512001/kov/internal/agent"
+	"github.com/up1512001/kov/internal/bus"
+	"github.com/up1512001/kov/internal/config"
+	"github.com/up1512001/kov/internal/db"
+	"github.com/up1512001/kov/internal/provider"
+	"github.com/up1512001/kov/internal/resilience"
+	"github.com/up1512001/kov/internal/session"
+	"github.com/up1512001/kov/internal/tools"
 )
 
 // BuildInfo contains version metadata injected at build time.

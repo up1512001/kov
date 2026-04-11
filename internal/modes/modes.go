@@ -3,7 +3,7 @@
 package modes
 
 import (
-	"github.com/utsavkovy/kov/internal/config"
+	"github.com/up1512001/kov/internal/config"
 )
 
 // Resolved holds the resolved configuration for a specific mode.

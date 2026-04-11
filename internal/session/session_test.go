@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/utsavkovy/kov/internal/bus"
-	"github.com/utsavkovy/kov/internal/db"
+	"github.com/up1512001/kov/internal/bus"
+	"github.com/up1512001/kov/internal/db"
 )
 
 func newTestManager(t *testing.T) (*Manager, *db.DB) {

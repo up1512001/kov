@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/utsavkovy/kov/internal/bus"
+	"github.com/up1512001/kov/internal/bus"
 )
 
 // mockProvider is a test provider that can simulate failures.

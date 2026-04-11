@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/utsavkovy/kov/internal/tools"
+	"github.com/up1512001/kov/internal/tools"
 )
 
 // Runner executes verification commands and manages fix loops.

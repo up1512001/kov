@@ -13,7 +13,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
-[![Release](https://img.shields.io/github/v/release/utsavkovy/kov)](https://github.com/utsavkovy/kov/releases)
+[![Release](https://img.shields.io/github/v/release/up1512001/kov)](https://github.com/up1512001/kov/releases)
 
 [Website](https://trykov.dev) · [Documentation](https://trykov.dev/docs) · [Discord](https://discord.gg/kov)
 
@@ -45,10 +45,10 @@ Every AI coding CLI today — Claude Code, Gemini CLI, Codex — crashes and los
 curl -fsSL trykov.dev/install.sh | sh
 
 # Or with Homebrew
-brew install utsavkovy/tap/kov
+brew install up1512001/tap/kov
 
 # Or from source
-go install github.com/utsavkovy/kov/cmd/kov@latest
+go install github.com/up1512001/kov/cmd/kov@latest
 ```
 
 ```bash
@@ -156,4 +156,4 @@ MIT — see [LICENSE](LICENSE).
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-Built with ❤️ by [Utsav](https://github.com/utsavkovy)
+Built with ❤️ by [Utsav](https://github.com/up1512001)

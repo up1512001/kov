@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/utsavkovy/kov/internal/bus"
+	"github.com/up1512001/kov/internal/bus"
 )
 
 // Router manages multiple providers in a failover chain.

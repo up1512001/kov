@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/utsavkovy/kov/internal/app"
+	"github.com/up1512001/kov/internal/app"
 )
 
 // Version information — injected at build time by GoReleaser.

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/utsavkovy/kov/internal/tools"
+	"github.com/up1512001/kov/internal/tools"
 )
 
 func TestAutoDetect_GoProject(t *testing.T) {
