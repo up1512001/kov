@@ -11,8 +11,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/utsavkovy/kov/internal/agent"
 	"github.com/utsavkovy/kov/internal/bus"
 	"github.com/utsavkovy/kov/internal/config"
+	"github.com/utsavkovy/kov/internal/db"
+	"github.com/utsavkovy/kov/internal/provider"
+	"github.com/utsavkovy/kov/internal/resilience"
+	"github.com/utsavkovy/kov/internal/tools"
 )
 
 // BuildInfo contains version metadata injected at build time.
@@ -119,15 +124,129 @@ func (a *App) runRoot(cmd *cobra.Command, args []string) error {
 
 	prompt := strings.Join(args, " ")
 	mode, _ := cmd.Flags().GetString("mode")
+	modelFlag, _ := cmd.Flags().GetString("model")
+	budgetFlag, _ := cmd.Flags().GetFloat64("budget")
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
-	a.logger.Info("starting session",
+	if verbose {
+		a.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+
+	// Load config
+	cfg, err := a.config.Get()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	model := cfg.Model
+	if modelFlag != "" {
+		model = modelFlag
+	}
+
+	budget := cfg.Cost.BudgetPerSession
+	if budgetFlag > 0 {
+		budget = budgetFlag
+	}
+
+	// Initialize DB
+	dbPath := cfg.DataDir + "/kov.db"
+	database, err := db.Open(dbPath, a.logger)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer database.Close()
+
+	// Build provider chain
+	providers := buildProviders(cfg)
+	if len(providers) == 0 {
+		fmt.Println("❌ No providers configured. Set an API key:")
+		fmt.Println("  export ANTHROPIC_API_KEY=sk-ant-...")
+		fmt.Println("  export OPENAI_API_KEY=sk-...")
+		fmt.Println("  export GEMINI_API_KEY=...")
+		return fmt.Errorf("no providers available")
+	}
+
+	router := provider.NewRouter(providers, a.bus, a.logger, provider.DefaultRouterConfig())
+	defer router.Close()
+
+	// Get project directory
+	projectDir, _ := os.Getwd()
+
+	// Initialize tools
+	toolRegistry := tools.DefaultRegistry(projectDir)
+
+	// Initialize resilience engine
+	engine := resilience.NewEngine(database, a.bus, a.logger, resilience.EngineConfig{
+		CheckpointEnabled: cfg.Resilience.Checkpoint,
+		LoopThreshold:     cfg.Resilience.LoopDetection.Threshold,
+		BudgetPerSession:  budget,
+		BudgetWarnAt:      cfg.Cost.WarnAt,
+		MaxFixRetries:     cfg.Verify.MaxFixRetries,
+	})
+
+	// Create session
+	sessionID, err := database.CreateSession(cmd.Context(), &db.Session{
+		ProjectDir: projectDir,
+		Mode:       mode,
+		Provider:   cfg.Provider,
+		Model:      model,
+		State:      "idle",
+		Prompt:     prompt,
+	})
+	if err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	a.logger.Info("session created",
+		slog.String("session", sessionID),
 		slog.String("mode", mode),
+		slog.String("model", model),
 		slog.String("prompt", truncate(prompt, 80)),
 	)
 
-	// TODO: Initialize agent and run (Day 7)
-	fmt.Printf("🔨 [%s mode] %s\n", mode, prompt)
-	fmt.Println("⚡ Agent loop not yet implemented — coming Day 7")
+	// Configure agent
+	agentCfg := agent.DefaultAgentConfig()
+	agentCfg.Mode = mode
+	agentCfg.Model = model
+	agentCfg.Permissions = cfg.Permissions
+	agentCfg.VerifyEnabled = cfg.Verify.Enabled
+	agentCfg.VerifyCommand = cfg.Verify.Command
+
+	ag := agent.New(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg)
+
+	// Set callbacks for terminal output
+	ag.SetCallbacks(
+		func(toolName, desc string) bool {
+			fmt.Printf("🔐 Allow %s? [y/N] ", desc)
+			var response string
+			fmt.Scanln(&response)
+			return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+		},
+		func(token string) { fmt.Print(token) },          // onToken
+		func(token string) { /* thinking — hide for now */ }, // onThinking
+		func(name, args string) {
+			fmt.Printf("\n⚙️  %s\n", name)
+		},
+		func(name, result string, err error) {
+			if err != nil {
+				fmt.Printf("   ❌ %s: %s\n", name, err)
+			} else {
+				fmt.Printf("   ✅ %s\n", name)
+			}
+		},
+		func(status string) { fmt.Println(status) },
+	)
+
+	// Run agent
+	fmt.Printf("🔨 [%s mode] %s\n\n", mode, truncate(prompt, 120))
+	if err := ag.Run(cmd.Context(), sessionID, prompt); err != nil {
+		fmt.Printf("\n❌ %s\n", err)
+		return err
+	}
+
+	// Print summary
+	sessionCost, _ := database.GetSessionCost(cmd.Context(), sessionID)
+	fmt.Printf("\n\n✅ Done (cost: $%.4f)\n", sessionCost)
 
 	return nil
 }
