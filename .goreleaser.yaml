@@ -3,7 +3,6 @@ project_name: kov
 before:
   hooks:
     - go mod tidy
-    - go generate ./...
 
 builds:
   - id: kov
@@ -47,18 +46,13 @@ changelog:
       - '^ci:'
       - '^chore:'
 
-brews:
-  - name: kov
-    repository:
-      owner: up1512001
-      name: homebrew-tap
-    homepage: "https://trykov.dev"
-    description: "Indestructible AI coding in your terminal"
-    license: MIT
-    install: |
-      bin.install "kov"
-    test: |
-      system "#{bin}/kov", "version"
+release:
+  github:
+    owner: up1512001
+    name: kov
+  draft: false
+  prerelease: auto
+  name_template: "Kov {{.Version}}"
 
 nfpms:
   - id: kov
@@ -70,3 +64,17 @@ nfpms:
     formats:
       - deb
       - rpm
+
+# Homebrew tap — uncomment after creating up1512001/homebrew-tap repo
+# brews:
+#   - name: kov
+#     repository:
+#       owner: up1512001
+#       name: homebrew-tap
+#     homepage: "https://trykov.dev"
+#     description: "Indestructible AI coding in your terminal"
+#     license: MIT
+#     install: |
+#       bin.install "kov"
+#     test: |
+#       system "#{bin}/kov", "version"
