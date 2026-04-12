@@ -51,7 +51,7 @@ release:
     name: kov
   draft: false
   prerelease: auto
-  name_template: "Kov {{.Version}}"
+  name_template: "{{.Tag}}"
 
 nfpms:
   - id: kov
