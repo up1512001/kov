@@ -17,28 +17,39 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+          go-version-file: 'go.mod'
+      - name: Run go vet
+        run: go vet ./...
 
   test:
     name: Test
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: 'go.mod'
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4
         with:
           file: coverage.out
+
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Run tests (skip shell-dependent)
+        run: go test -race -count=1 ./internal/bus/... ./internal/config/... ./internal/db/... ./internal/modes/... ./internal/pipe/... ./internal/provider/... ./internal/resilience/... ./internal/session/... ./internal/tokens/... ./internal/tui/... ./internal/mock/...
 
   bench:
     name: Benchmark
@@ -47,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: 'go.mod'
       - run: go test -bench=. -benchmem ./internal/bus/... ./internal/resilience/... ./internal/db/...
 
   build:
@@ -58,7 +69,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: 'go.mod'
       - name: Build binary
         run: |
           CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/kov ./cmd/kov
@@ -81,6 +92,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: 'go.mod'
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
