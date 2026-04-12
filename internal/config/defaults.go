@@ -10,10 +10,9 @@ func Defaults() *Config {
 		Provider:    "anthropic",
 		Permissions: "confirm",
 		Providers: ProvidersConfig{
-			Ollama: &OllamaConfig{
-				URL:   "http://localhost:11434",
-				Model: "qwen3:8b",
-			},
+			// All providers are nil by default.
+			// They are populated from env vars, config files, or auto-detection.
+			// Ollama is NOT hardcoded — it's only added when confirmed running.
 		},
 		Resilience: ResilienceConfig{
 			Checkpoint:       true,

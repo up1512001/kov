@@ -144,7 +144,9 @@ func defaultDataDir() string {
 	return filepath.Join(home, ".local", "share", "kov")
 }
 
-// GetAvailableProviders returns the IDs of providers that have API keys configured.
+// GetAvailableProviders returns the IDs of providers that are actually usable.
+// For cloud providers, this means having an API key configured.
+// For Ollama, this means the service is actually running (health check).
 func (c *Config) GetAvailableProviders() []string {
 	var providers []string
 	if c.Providers.Anthropic != nil && c.Providers.Anthropic.APIKey != "" {
@@ -156,8 +158,11 @@ func (c *Config) GetAvailableProviders() []string {
 	if c.Providers.Google != nil && c.Providers.Google.APIKey != "" {
 		providers = append(providers, "google")
 	}
+	// Ollama: only report as available if explicitly configured AND confirmed running
 	if c.Providers.Ollama != nil && c.Providers.Ollama.URL != "" {
-		providers = append(providers, "ollama")
+		if isOllamaRunning() {
+			providers = append(providers, "ollama")
+		}
 	}
 	return providers
 }
