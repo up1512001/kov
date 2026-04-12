@@ -64,18 +64,5 @@ nfpms:
       - deb
       - rpm
 
-# Homebrew tap (macOS / Linux)
-# Requires: PAT with repo scope stored as HOMEBREW_TAP_TOKEN secret
-brews:
-  - name: kov
-    repository:
-      owner: up1512001
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://trykov.dev"
-    description: "Indestructible AI coding in your terminal"
-    license: MIT
-    install: |
-      bin.install "kov"
-    test: |
-      system "#{bin}/kov", "version"
+# Homebrew tap is managed separately in up1512001/homebrew-tap
+
