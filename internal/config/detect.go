@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,13 @@ type DetectedProvider struct {
 	Name   string // anthropic, openai, google, ollama
 	Source string // e.g. "env:ANTHROPIC_API_KEY", "claude-code-cli", "local:11434"
 	APIKey string // populated for cloud providers
+}
+
+// DetectedCLI represents an AI coding CLI tool found on the system.
+type DetectedCLI struct {
+	Name    string // "claude", "codex"
+	Path    string // absolute path to binary
+	Version string // version string from --version
 }
 
 // DetectSystemProviders scans the system for available AI providers.
@@ -71,6 +79,44 @@ func DetectSystemProviders() []DetectedProvider {
 	return detected
 }
 
+// DetectCLITools scans the system for known AI coding CLI tools.
+// This is for display purposes — shows what's installed regardless of API key status.
+func DetectCLITools() []DetectedCLI {
+	var detected []DetectedCLI
+
+	clis := []struct {
+		name  string
+		vFlag string
+	}{
+		{"claude", "--version"},
+		{"codex", "--version"},
+	}
+
+	for _, cli := range clis {
+		path, err := exec.LookPath(cli.name)
+		if err != nil {
+			continue
+		}
+
+		version := ""
+		out, err := exec.Command(path, cli.vFlag).Output()
+		if err == nil {
+			version = strings.TrimSpace(string(out))
+			if idx := strings.IndexByte(version, '\n'); idx >= 0 {
+				version = version[:idx]
+			}
+		}
+
+		detected = append(detected, DetectedCLI{
+			Name:    cli.name,
+			Path:    path,
+			Version: version,
+		})
+	}
+
+	return detected
+}
+
 // IsFirstRun returns true if no user config file exists.
 func IsFirstRun() bool {
 	userConfigDir, err := os.UserConfigDir()
@@ -99,7 +145,6 @@ func isCommandAvailable(name string) bool {
 }
 
 // detectClaudeCodeCLI checks for Claude Code CLI and reads its API key.
-// Claude Code stores config in several possible locations.
 func detectClaudeCodeCLI() string {
 	if !isCommandAvailable("claude") {
 		return ""
@@ -123,9 +168,7 @@ func detectClaudeCodeCLI() string {
 		}
 	}
 
-	// Claude Code may use ANTHROPIC_API_KEY env var which we already check,
-	// but the CLI being present is still valuable info. Return empty string
-	// since we handled env var detection already.
+	// Claude Code may use OAuth (no stored API key). Return empty.
 	return ""
 }
 
@@ -140,7 +183,6 @@ func detectCodexCLI() string {
 		return ""
 	}
 
-	// Check known Codex config locations
 	configPaths := []string{
 		filepath.Join(home, ".codex", "config.json"),
 		filepath.Join(home, ".config", "codex", "config.json"),
@@ -150,7 +192,6 @@ func detectCodexCLI() string {
 		if key := readAPIKeyFromJSON(path, "apiKey"); key != "" {
 			return key
 		}
-		// Also try "api_key" key name
 		if key := readAPIKeyFromJSON(path, "api_key"); key != "" {
 			return key
 		}

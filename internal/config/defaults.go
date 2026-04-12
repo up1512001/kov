@@ -17,7 +17,7 @@ func Defaults() *Config {
 		Resilience: ResilienceConfig{
 			Checkpoint:       true,
 			Failover:         true,
-			FallbackProvider: "ollama",
+			FallbackProvider: "",
 			MaxRetries:       3,
 			Backoff: BackoffConfig{
 				Initial: 2 * time.Second,

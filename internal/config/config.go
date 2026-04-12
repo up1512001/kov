@@ -69,6 +69,9 @@ func Load() (*Config, error) {
 	// Inject API keys from environment if not set in config
 	cfg.resolveAPIKeys()
 
+	// Detect installed AI CLI tools
+	cfg.DetectedCLIs = DetectCLITools()
+
 	return cfg, nil
 }
 
@@ -129,6 +132,14 @@ func (c *Config) resolveAPIKeys() {
 			c.Providers.Ollama.URL = host
 		}
 	}
+
+	// Auto-detect Ollama only if not explicitly configured and actually running
+	if c.Providers.Ollama == nil && isOllamaRunning() {
+		c.Providers.Ollama = &OllamaConfig{
+			URL:   "http://localhost:11434",
+			Model: "qwen3:8b",
+		}
+	}
 }
 
 // defaultDataDir returns the default data storage directory.
@@ -158,7 +169,7 @@ func (c *Config) GetAvailableProviders() []string {
 	if c.Providers.Google != nil && c.Providers.Google.APIKey != "" {
 		providers = append(providers, "google")
 	}
-	// Ollama: only report as available if explicitly configured AND confirmed running
+	// Ollama: only report as available if configured AND confirmed running
 	if c.Providers.Ollama != nil && c.Providers.Ollama.URL != "" {
 		if isOllamaRunning() {
 			providers = append(providers, "ollama")

@@ -50,6 +50,9 @@ type Config struct {
 
 	// DataDir is where kov stores its data (~/.local/share/kov).
 	DataDir string `mapstructure:"dataDir" yaml:"dataDir"`
+
+	// DetectedCLIs holds AI coding tools found on the system (populated at load time, not persisted).
+	DetectedCLIs []DetectedCLI `mapstructure:"-" yaml:"-"`
 }
 
 // ProvidersConfig holds configuration for each LLM provider.
