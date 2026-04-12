@@ -1,3 +1,5 @@
+version: 2
+
 project_name: kov
 
 before:
@@ -25,17 +27,14 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
 
 checksum:
   name_template: 'checksums.txt'
-
-snapshot:
-  name_template: "{{ .Tag }}-next"
 
 changelog:
   sort: asc
@@ -66,13 +65,13 @@ nfpms:
       - rpm
 
 # Homebrew tap (macOS / Linux)
-# Requires: create repo github.com/up1512001/homebrew-tap
+# Requires: PAT with repo scope stored as HOMEBREW_TAP_TOKEN secret
 brews:
   - name: kov
     repository:
       owner: up1512001
       name: homebrew-tap
-      token: "{{ .Env.GITHUB_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://trykov.dev"
     description: "Indestructible AI coding in your terminal"
     license: MIT
@@ -80,15 +79,3 @@ brews:
       bin.install "kov"
     test: |
       system "#{bin}/kov", "version"
-
-# Scoop bucket (Windows)
-# Requires: create repo github.com/up1512001/scoop-bucket
-scoops:
-  - name: kov
-    repository:
-      owner: up1512001
-      name: scoop-bucket
-      token: "{{ .Env.GITHUB_TOKEN }}"
-    homepage: "https://trykov.dev"
-    description: "Indestructible AI coding in your terminal"
-    license: MIT
