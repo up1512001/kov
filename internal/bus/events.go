@@ -181,10 +181,11 @@ func (SessionResumed) eventMarker() {}
 
 // SessionEnded is emitted when a session completes or is stopped.
 type SessionEnded struct {
-	SessionID  string
-	TotalCost  float64
-	TasksTotal int
-	TasksDone  int
+	SessionID   string
+	TotalCost   float64
+	TasksTotal  int
+	TasksDone   int
+	FilesEdited []string
 }
 
 func (SessionEnded) eventMarker() {}

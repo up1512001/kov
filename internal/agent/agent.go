@@ -14,8 +14,10 @@ import (
 	"github.com/up1512001/kov/internal/bus"
 	kovctx "github.com/up1512001/kov/internal/context"
 	"github.com/up1512001/kov/internal/db"
+	"github.com/up1512001/kov/internal/diff"
 	"github.com/up1512001/kov/internal/provider"
 	"github.com/up1512001/kov/internal/resilience"
+	"github.com/up1512001/kov/internal/tokens"
 	"github.com/up1512001/kov/internal/tools"
 )
 
@@ -29,6 +31,10 @@ type Agent struct {
 	logger    *slog.Logger
 	config    AgentConfig
 	sessionID string
+
+	// Context management
+	compactor *tokens.Compactor
+	tracker   *diff.Tracker
 
 	// Callbacks for permission requests and output display
 	onPermission func(toolName, description string) bool
@@ -81,14 +87,20 @@ func New(
 	logger *slog.Logger,
 	config AgentConfig,
 ) *Agent {
+	// Set up context window compaction based on the model
+	window := tokens.EstimateModelWindow(config.Model)
+	compactor := tokens.NewCompactor(window, config.MaxTokens)
+
 	return &Agent{
-		db:     database,
-		router: router,
-		tools:  toolRegistry,
-		engine: engine,
-		bus:    eventBus,
-		logger: logger,
-		config: config,
+		db:        database,
+		router:    router,
+		tools:     toolRegistry,
+		engine:    engine,
+		bus:       eventBus,
+		logger:    logger,
+		config:    config,
+		compactor: compactor,
+		tracker:   diff.NewTracker(),
 	}
 }
 
@@ -219,14 +231,20 @@ func (a *Agent) Run(ctx context.Context, sessionID string, prompt string) error 
 	// Done
 	a.engine.Transition(ctx, resilience.StateDone)
 
+	// Show change summary
+	if summary := a.tracker.Summary(); summary != "No files changed." {
+		a.emit("\n" + summary)
+	}
+
 	// Emit session end
 	total, done, _, _ := a.db.GetTaskStats(ctx, sessionID)
 	sessionCost, _ := a.db.GetSessionCost(ctx, sessionID)
 	a.bus.Publish(bus.SessionEnded{
-		SessionID:  sessionID,
-		TotalCost:  sessionCost,
-		TasksTotal: total,
-		TasksDone:  done,
+		SessionID:   sessionID,
+		TotalCost:   sessionCost,
+		TasksTotal:  total,
+		TasksDone:   done,
+		FilesEdited: a.tracker.FilesChanged(),
 	})
 
 	return nil
@@ -380,6 +398,7 @@ func (a *Agent) verify(ctx context.Context) error {
 }
 
 // buildMessages loads conversation history from DB and converts to provider format.
+// Automatically compacts messages if they exceed the context window.
 func (a *Agent) buildMessages(ctx context.Context) ([]provider.Message, error) {
 	dbMessages, err := a.db.GetMessages(ctx, a.sessionID)
 	if err != nil {
@@ -387,8 +406,9 @@ func (a *Agent) buildMessages(ctx context.Context) ([]provider.Message, error) {
 	}
 
 	// System prompt at the beginning
+	systemPrompt := a.buildSystemPrompt()
 	messages := []provider.Message{
-		{Role: "system", Content: a.buildSystemPrompt()},
+		{Role: "system", Content: systemPrompt},
 	}
 
 	for _, m := range dbMessages {
@@ -399,6 +419,38 @@ func (a *Agent) buildMessages(ctx context.Context) ([]provider.Message, error) {
 			Name:       m.ToolName,
 		}
 		messages = append(messages, msg)
+	}
+
+	// Auto-compact if conversation exceeds context window
+	tokenMsgs := make([]tokens.MessageTokens, len(messages))
+	for i, m := range messages {
+		tokenMsgs[i] = tokens.MessageTokens{
+			Role:    m.Role,
+			Content: m.Content,
+			Tokens:  estimateTokens(m.Content),
+		}
+	}
+
+	if a.compactor.NeedsCompaction(tokenMsgs) {
+		a.logger.Info("compacting conversation",
+			slog.Int("messages_before", len(messages)),
+			slog.Int("budget", a.compactor.Budget()))
+
+		compacted := a.compactor.Compact(tokenMsgs)
+
+		// Rebuild messages from compacted tokens
+		newMessages := make([]provider.Message, len(compacted))
+		for i, ct := range compacted {
+			newMessages[i] = provider.Message{
+				Role:    ct.Role,
+				Content: ct.Content,
+			}
+		}
+		messages = newMessages
+
+		a.logger.Info("compaction complete",
+			slog.Int("messages_after", len(messages)))
+		a.emit("📦 Conversation compacted to fit context window")
 	}
 
 	return messages, nil
