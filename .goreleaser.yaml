@@ -65,16 +65,30 @@ nfpms:
       - deb
       - rpm
 
-# Homebrew tap — uncomment after creating up1512001/homebrew-tap repo
-# brews:
-#   - name: kov
-#     repository:
-#       owner: up1512001
-#       name: homebrew-tap
-#     homepage: "https://trykov.dev"
-#     description: "Indestructible AI coding in your terminal"
-#     license: MIT
-#     install: |
-#       bin.install "kov"
-#     test: |
-#       system "#{bin}/kov", "version"
+# Homebrew tap (macOS / Linux)
+# Requires: create repo github.com/up1512001/homebrew-tap
+brews:
+  - name: kov
+    repository:
+      owner: up1512001
+      name: homebrew-tap
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    homepage: "https://trykov.dev"
+    description: "Indestructible AI coding in your terminal"
+    license: MIT
+    install: |
+      bin.install "kov"
+    test: |
+      system "#{bin}/kov", "version"
+
+# Scoop bucket (Windows)
+# Requires: create repo github.com/up1512001/scoop-bucket
+scoops:
+  - name: kov
+    repository:
+      owner: up1512001
+      name: scoop-bucket
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    homepage: "https://trykov.dev"
+    description: "Indestructible AI coding in your terminal"
+    license: MIT
