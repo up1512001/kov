@@ -9,16 +9,11 @@ func Defaults() *Config {
 		Model:       "claude-sonnet-4-20250514",
 		Provider:    "anthropic",
 		Permissions: "confirm",
-		Providers: ProvidersConfig{
-			Ollama: &OllamaConfig{
-				URL:   "http://localhost:11434",
-				Model: "qwen3:8b",
-			},
-		},
+		Providers: ProvidersConfig{},
 		Resilience: ResilienceConfig{
 			Checkpoint:       true,
 			Failover:         true,
-			FallbackProvider: "ollama",
+			FallbackProvider: "",
 			MaxRetries:       3,
 			Backoff: BackoffConfig{
 				Initial: 2 * time.Second,

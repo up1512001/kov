@@ -47,18 +47,12 @@ func buildProviders(cfg *config.Config) []provider.Provider {
 				))
 			}
 		case "ollama":
-			host := "http://localhost:11434"
-			model := "qwen3:8b"
-			if cfg.Providers.Ollama != nil {
-				if cfg.Providers.Ollama.URL != "" {
-					host = cfg.Providers.Ollama.URL
-				}
-				if cfg.Providers.Ollama.Model != "" {
-					model = cfg.Providers.Ollama.Model
-				}
+			if cfg.Providers.Ollama != nil && cfg.Providers.Ollama.URL != "" {
+				providers = append(providers, provider.NewOllamaProvider(
+					cfg.Providers.Ollama.URL,
+					cfg.Providers.Ollama.Model,
+				))
 			}
-			// Ollama is always added as the final fallback
-			providers = append(providers, provider.NewOllamaProvider(host, model))
 		}
 	}
 

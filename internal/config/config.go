@@ -1,10 +1,13 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -69,6 +72,9 @@ func Load() (*Config, error) {
 	// Inject API keys from environment if not set in config
 	cfg.resolveAPIKeys()
 
+	// Detect installed AI CLI tools
+	cfg.DetectedCLIs = DetectCLITools()
+
 	return cfg, nil
 }
 
@@ -129,6 +135,31 @@ func (c *Config) resolveAPIKeys() {
 			c.Providers.Ollama.URL = host
 		}
 	}
+
+	// Auto-detect Ollama only if not explicitly configured and actually running
+	if c.Providers.Ollama == nil && isOllamaReachable("http://localhost:11434") {
+		c.Providers.Ollama = &OllamaConfig{
+			URL:   "http://localhost:11434",
+			Model: "qwen3:8b",
+		}
+	}
+}
+
+// isOllamaReachable checks if Ollama is actually running at the given URL.
+func isOllamaReachable(baseURL string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/tags", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 200
 }
 
 // defaultDataDir returns the default data storage directory.

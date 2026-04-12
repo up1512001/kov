@@ -4,11 +4,13 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/up1512001/kov/internal/agent"
@@ -19,6 +21,8 @@ import (
 	"github.com/up1512001/kov/internal/resilience"
 	"github.com/up1512001/kov/internal/session"
 	"github.com/up1512001/kov/internal/tools"
+	"github.com/up1512001/kov/internal/tmux"
+	"github.com/up1512001/kov/internal/tui"
 )
 
 // BuildInfo contains version metadata injected at build time.
@@ -65,6 +69,7 @@ func New(build BuildInfo) *App {
 		a.buildVersionCmd(),
 		a.buildModelsCmd(),
 		a.buildConfigCmd(),
+		a.buildSetupCmd(),
 	)
 
 	return a
@@ -107,6 +112,7 @@ Documentation: https://trykov.dev`,
 	flags.Float64("budget", 0, "Max cost (USD) for this session")
 	flags.String("permissions", "", "Permission mode: confirm, smart, yolo, chat")
 	flags.Bool("verbose", false, "Enable verbose logging")
+	flags.Bool("tmux", false, "Run session in an isolated tmux window")
 	flags.String("profile", "", "Enable profiling: cpu, mem, trace")
 
 	return cmd
@@ -114,13 +120,45 @@ Documentation: https://trykov.dev`,
 
 // runRoot handles the main `kov [prompt]` command.
 func (a *App) runRoot(cmd *cobra.Command, args []string) error {
+	// Handle --tmux flag: re-exec inside an isolated tmux session
+	useTmux, _ := cmd.Flags().GetBool("tmux")
+	if useTmux && !tmux.IsInsideSession() {
+		if !tmux.IsAvailable() {
+			return fmt.Errorf("tmux is not installed. Install it with: brew install tmux")
+		}
+		sessionName := "kov-session"
+		if len(args) > 0 {
+			// Use a short hash of the prompt for the session name
+			sessionName = fmt.Sprintf("kov-%s", truncate(strings.Join(args, "-"), 20))
+		}
+
+		if err := tmux.NewSession(sessionName); err != nil {
+			return fmt.Errorf("creating tmux session: %w", err)
+		}
+
+		// Re-exec kov inside the tmux session without --tmux to avoid recursion
+		reCmd := "kov"
+		for _, arg := range args {
+			reCmd += " " + fmt.Sprintf("%q", arg)
+		}
+		flagsToForward := []string{"mode", "model", "provider", "permissions"}
+		for _, f := range flagsToForward {
+			val, _ := cmd.Flags().GetString(f)
+			if val != "" {
+				reCmd += fmt.Sprintf(" --%s %s", f, val)
+			}
+		}
+		if err := tmux.RunInSession(sessionName, reCmd); err != nil {
+			return fmt.Errorf("running in tmux: %w", err)
+		}
+
+		fmt.Printf("Started kov in tmux session: %s\n", sessionName)
+		fmt.Printf("Attach with: tmux attach -t %s\n", sessionName)
+		return tmux.AttachSession(sessionName)
+	}
+
 	if len(args) == 0 {
-		// No prompt — start interactive mode
-		fmt.Println(a.banner())
-		fmt.Println("  Type your prompt, or use --help for options.")
-		fmt.Println()
-		// TODO: Start interactive TUI (Day 10)
-		return nil
+		return a.runInteractive(cmd)
 	}
 
 	prompt := strings.Join(args, " ")
@@ -251,6 +289,245 @@ func (a *App) runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n\n✅ Done (cost: $%.4f)\n", sessionCost)
 
 	return nil
+}
+
+// runInteractive starts the interactive REPL mode with Bubble Tea TUI.
+func (a *App) runInteractive(cmd *cobra.Command) error {
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	if verbose {
+		a.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+
+	cfg, err := a.config.Get()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	mode, _ := cmd.Flags().GetString("mode")
+	modelFlag, _ := cmd.Flags().GetString("model")
+	budgetFlag, _ := cmd.Flags().GetFloat64("budget")
+
+	model := cfg.Model
+	if modelFlag != "" {
+		model = modelFlag
+	}
+
+	budget := cfg.Cost.BudgetPerSession
+	if budgetFlag > 0 {
+		budget = budgetFlag
+	}
+
+	// Build provider chain
+	providers := buildProviders(cfg)
+	if len(providers) == 0 {
+		// No providers — show setup guidance
+		fmt.Println(a.banner())
+		fmt.Println("  No providers configured.")
+		fmt.Println()
+		if len(cfg.DetectedCLIs) > 0 {
+			fmt.Println("  Detected CLI tools on your system:")
+			for _, cli := range cfg.DetectedCLIs {
+				fmt.Printf("    ✓ %s at %s", cli.Name, cli.Path)
+				if cli.Version != "" {
+					fmt.Printf(" (%s)", cli.Version)
+				}
+				fmt.Println()
+			}
+			fmt.Println()
+			fmt.Println("  These tools use OAuth — KOV needs an explicit API key.")
+		}
+		fmt.Println()
+		fmt.Println("  Set up a provider:")
+		fmt.Println("    export ANTHROPIC_API_KEY=sk-ant-...  # Get from console.anthropic.com/settings/keys")
+		fmt.Println("    export OPENAI_API_KEY=sk-...          # Get from platform.openai.com/api-keys")
+		fmt.Println("    export GEMINI_API_KEY=...             # Get from aistudio.google.com/apikey")
+		fmt.Println()
+		fmt.Println("  Or run: kov setup")
+		return nil
+	}
+
+	// Initialize DB
+	dbPath := cfg.DataDir + "/kov.db"
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return fmt.Errorf("creating data dir: %w", err)
+	}
+	database, err := db.Open(dbPath, a.logger)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer database.Close()
+
+	router := provider.NewRouter(providers, a.bus, a.logger, provider.DefaultRouterConfig())
+	defer router.Close()
+
+	projectDir, _ := os.Getwd()
+	toolRegistry := tools.DefaultRegistry(projectDir)
+
+	engine := resilience.NewEngine(database, a.bus, a.logger, resilience.EngineConfig{
+		CheckpointEnabled: cfg.Resilience.Checkpoint,
+		LoopThreshold:     cfg.Resilience.LoopDetection.Threshold,
+		BudgetPerSession:  budget,
+		BudgetWarnAt:      cfg.Cost.WarnAt,
+		MaxFixRetries:     cfg.Verify.MaxFixRetries,
+	})
+
+	// Create the wrapper that connects TUI to agent
+	promptCh := make(chan agentRequest, 1)
+	wrapper := &interactiveWrapper{
+		model:    tui.NewInteractiveModel(mode, model, a.build.Version),
+		promptCh: promptCh,
+	}
+
+	p := tea.NewProgram(wrapper, tea.WithAltScreen())
+
+	// Background agent runner — processes prompts from the TUI
+	go func() {
+		for req := range promptCh {
+			a.runAgentForPrompt(req, p, database, router, toolRegistry, engine, cfg, mode, model, projectDir)
+		}
+	}()
+
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	close(promptCh)
+	return nil
+}
+
+// agentRequest represents a prompt submitted from the interactive TUI.
+type agentRequest struct {
+	prompt string
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// runAgentForPrompt runs the agent loop for a single interactive prompt.
+func (a *App) runAgentForPrompt(
+	req agentRequest,
+	p *tea.Program,
+	database *db.DB,
+	router *provider.Router,
+	toolRegistry *tools.Registry,
+	engine *resilience.Engine,
+	cfg *config.Config,
+	mode, model, projectDir string,
+) {
+	sessionID, err := database.CreateSession(req.ctx, &db.Session{
+		ProjectDir: projectDir,
+		Mode:       mode,
+		Provider:   cfg.Provider,
+		Model:      model,
+		State:      "idle",
+		Prompt:     req.prompt,
+	})
+	if err != nil {
+		p.Send(tui.ErrorMsg{Error: fmt.Sprintf("creating session: %s", err)})
+		return
+	}
+
+	agentCfg := agent.DefaultAgentConfig()
+	agentCfg.Mode = mode
+	agentCfg.Model = model
+	agentCfg.Permissions = cfg.Permissions
+	agentCfg.VerifyEnabled = cfg.Verify.Enabled
+	agentCfg.VerifyCommand = cfg.Verify.Command
+	agentCfg.ProjectDir = projectDir
+
+	ag := agent.New(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg)
+	ag.SetCallbacks(
+		func(toolName, desc string) bool {
+			respCh := make(chan bool, 1)
+			p.Send(tui.PermissionMsg{
+				Tool:        toolName,
+				Description: desc,
+				ResponseCh:  respCh,
+			})
+			select {
+			case resp := <-respCh:
+				return resp
+			case <-req.ctx.Done():
+				return false
+			}
+		},
+		func(token string) { p.Send(tui.TokenMsg{Token: token}) },
+		func(token string) { p.Send(tui.ThinkingMsg{Token: token}) },
+		func(name, args string) { p.Send(tui.ToolCallMsg{Name: name}) },
+		func(name, result string, err error) {
+			p.Send(tui.ToolResultMsg{
+				Name:    name,
+				Success: err == nil,
+				Error:   fmt.Sprintf("%v", err),
+			})
+		},
+		func(status string) { p.Send(tui.StatusMsg{Status: status}) },
+	)
+
+	if err := ag.Run(req.ctx, sessionID, req.prompt); err != nil {
+		if req.ctx.Err() != nil {
+			p.Send(tui.DoneMsg{Cost: 0}) // Cancelled — just return to input
+		} else {
+			p.Send(tui.ErrorMsg{Error: err.Error()})
+		}
+		return
+	}
+
+	sessionCost, _ := database.GetSessionCost(req.ctx, sessionID)
+	p.Send(tui.DoneMsg{Cost: sessionCost})
+}
+
+// interactiveWrapper wraps the TUI model to intercept SubmitMsg and CancelMsg
+// and route them to the agent goroutine.
+type interactiveWrapper struct {
+	model    tui.Model
+	promptCh chan<- agentRequest
+	cancelFn context.CancelFunc
+}
+
+func (w *interactiveWrapper) Init() tea.Cmd {
+	return w.model.Init()
+}
+
+func (w *interactiveWrapper) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tui.SubmitMsg:
+		// Forward to the TUI model first (to update state)
+		result, cmd := w.model.Update(msg)
+		w.model = result.(tui.Model)
+
+		// Cancel any running agent
+		if w.cancelFn != nil {
+			w.cancelFn()
+		}
+
+		// Start agent in background
+		ctx, cancel := context.WithCancel(context.Background())
+		w.cancelFn = cancel
+
+		go func() {
+			w.promptCh <- agentRequest{prompt: msg.Text, ctx: ctx, cancel: cancel}
+		}()
+
+		return w, cmd
+
+	case tui.CancelMsg:
+		if w.cancelFn != nil {
+			w.cancelFn()
+			w.cancelFn = nil
+		}
+		// Forward to model to update state
+		result, cmd := w.model.Update(tui.ErrorMsg{Error: "Cancelled."})
+		w.model = result.(tui.Model)
+		return w, cmd
+	}
+
+	result, cmd := w.model.Update(msg)
+	w.model = result.(tui.Model)
+	return w, cmd
+}
+
+func (w *interactiveWrapper) View() string {
+	return w.model.View()
 }
 
 // buildResumeCmd creates the `kov resume` command.
@@ -426,19 +703,55 @@ func (a *App) buildModelsCmd() *cobra.Command {
 				return fmt.Errorf("loading config: %w", err)
 			}
 
-			providers := cfg.GetAvailableProviders()
-			if len(providers) == 0 {
+			availableProviders := cfg.GetAvailableProviders()
+			if len(availableProviders) == 0 {
 				fmt.Println("No providers configured. Set an API key:")
-				fmt.Println("  export ANTHROPIC_API_KEY=sk-...")
-				fmt.Println("  export OPENAI_API_KEY=sk-...")
-				fmt.Println("  export GEMINI_API_KEY=...")
+				fmt.Println("  export ANTHROPIC_API_KEY=sk-ant-...  # console.anthropic.com/settings/keys")
+				fmt.Println("  export OPENAI_API_KEY=sk-...          # platform.openai.com/api-keys")
+				fmt.Println("  export GEMINI_API_KEY=...             # aistudio.google.com/apikey")
+				if len(cfg.DetectedCLIs) > 0 {
+					fmt.Println()
+					fmt.Println("Detected CLI tools (but KOV needs its own API key):")
+					for _, cli := range cfg.DetectedCLIs {
+						fmt.Printf("  ✓ %s", cli.Name)
+						if cli.Version != "" {
+							fmt.Printf(" (%s)", cli.Version)
+						}
+						fmt.Println()
+					}
+				}
 				return nil
 			}
 
-			fmt.Println("Available providers:")
-			for _, p := range providers {
-				fmt.Printf("  ✓ %s\n", p)
+			// Show models grouped by provider
+			providerModels := map[string][]provider.Model{
+				"anthropic": provider.NewAnthropicProvider("", "").Models(),
+				"openai":    provider.NewOpenAIProvider("", "").Models(),
+				"google":    provider.NewGoogleProvider("", "").Models(),
 			}
+
+			fmt.Println("Available providers and models:")
+			for _, pid := range availableProviders {
+				fmt.Printf("\n  ✓ %s\n", pid)
+				if models, ok := providerModels[pid]; ok {
+					for _, m := range models {
+						defaultMark := " "
+						if m.ID == cfg.Model {
+							defaultMark = "*"
+						}
+						fmt.Printf("   %s %-30s  %dk ctx  $%.2f/$%.2f per 1M tokens\n",
+							defaultMark, m.ID, m.ContextWindow/1000,
+							m.InputCostPer1M, m.OutputCostPer1M)
+					}
+				}
+				if pid == "ollama" {
+					if cfg.Providers.Ollama != nil {
+						fmt.Printf("    %-30s  (local, free)\n", cfg.Providers.Ollama.Model)
+					}
+				}
+			}
+			fmt.Println()
+			fmt.Println("  * = current default")
 			return nil
 		},
 	}
@@ -465,8 +778,89 @@ func (a *App) buildConfigCmd() *cobra.Command {
 			fmt.Printf("Cost budget:      $%.2f/session\n", cfg.Cost.BudgetPerSession)
 
 			providers := cfg.GetAvailableProviders()
-			fmt.Printf("Providers:        %s\n", strings.Join(providers, ", "))
+			if len(providers) > 0 {
+				fmt.Printf("Providers:        %s\n", strings.Join(providers, ", "))
+			} else {
+				fmt.Printf("Providers:        (none configured)\n")
+			}
 
+			if len(cfg.DetectedCLIs) > 0 {
+				fmt.Println()
+				fmt.Println("Detected CLI tools:")
+				for _, cli := range cfg.DetectedCLIs {
+					fmt.Printf("  ✓ %s at %s", cli.Name, cli.Path)
+					if cli.Version != "" {
+						fmt.Printf(" (%s)", cli.Version)
+					}
+					fmt.Println()
+				}
+			}
+
+			return nil
+		},
+	}
+}
+
+// buildSetupCmd creates the `kov setup` command for first-run provider configuration.
+func (a *App) buildSetupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup",
+		Short: "Configure providers interactively",
+		Long: `Set up your AI provider for KOV. This guides you through
+configuring an API key so KOV can connect to your preferred model.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.config.Get()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			fmt.Println(a.banner())
+
+			// Show detected CLI tools
+			if len(cfg.DetectedCLIs) > 0 {
+				fmt.Println("  Detected CLI tools:")
+				for _, cli := range cfg.DetectedCLIs {
+					fmt.Printf("    ✓ %s at %s", cli.Name, cli.Path)
+					if cli.Version != "" {
+						fmt.Printf(" (%s)", cli.Version)
+					}
+					fmt.Println()
+				}
+				fmt.Println()
+				fmt.Println("  Note: Claude Code and Codex use OAuth. KOV needs its own API key.")
+				fmt.Println()
+			}
+
+			// Show current providers
+			available := cfg.GetAvailableProviders()
+			if len(available) > 0 {
+				fmt.Printf("  Already configured: %s\n\n", strings.Join(available, ", "))
+			}
+
+			fmt.Println("  To add a provider, set one of these environment variables:")
+			fmt.Println()
+			fmt.Println("    Anthropic (recommended):")
+			fmt.Println("      export ANTHROPIC_API_KEY=sk-ant-...")
+			fmt.Println("      Get yours at: console.anthropic.com/settings/keys")
+			fmt.Println()
+			fmt.Println("    OpenAI:")
+			fmt.Println("      export OPENAI_API_KEY=sk-...")
+			fmt.Println("      Get yours at: platform.openai.com/api-keys")
+			fmt.Println()
+			fmt.Println("    Google:")
+			fmt.Println("      export GEMINI_API_KEY=...")
+			fmt.Println("      Get yours at: aistudio.google.com/apikey")
+			fmt.Println()
+			fmt.Println("    Ollama (local, free):")
+			fmt.Println("      Install from: ollama.com")
+			fmt.Println("      KOV auto-detects Ollama when it's running.")
+			fmt.Println()
+			fmt.Println("  Or add to ~/.config/kov/config.yaml:")
+			fmt.Println("    providers:")
+			fmt.Println("      anthropic:")
+			fmt.Println("        apiKey: sk-ant-...")
+			fmt.Println()
+			fmt.Println("  Then run: kov")
 			return nil
 		},
 	}

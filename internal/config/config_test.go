@@ -73,12 +73,22 @@ func TestGetAvailableProviders(t *testing.T) {
 	cfg := Defaults()
 	cfg.Providers.Anthropic = &ProviderConfig{APIKey: "sk-test"}
 	cfg.Providers.OpenAI = &ProviderConfig{APIKey: "sk-test"}
-	// Google not set, Ollama has default URL
+	// Google not set, Ollama not in defaults anymore
 
 	providers := cfg.GetAvailableProviders()
 
-	if len(providers) != 3 {
-		t.Errorf("expected 3 providers (anthropic, openai, ollama), got %d: %v", len(providers), providers)
+	if len(providers) != 2 {
+		t.Errorf("expected 2 providers (anthropic, openai), got %d: %v", len(providers), providers)
+	}
+}
+
+func TestDefaults_NoOllamaByDefault(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Providers.Ollama != nil {
+		t.Error("expected no Ollama provider in defaults")
+	}
+	if cfg.Resilience.FallbackProvider != "" {
+		t.Errorf("expected empty fallback provider, got %s", cfg.Resilience.FallbackProvider)
 	}
 }
 
