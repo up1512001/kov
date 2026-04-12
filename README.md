@@ -11,8 +11,10 @@
 
 ### Indestructible AI coding in your terminal
 
+*kov (ков)* — from the Slavic root meaning **"to forge."** Kov forges your code, unbreakably.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev)
 [![Release](https://img.shields.io/github/v/release/up1512001/kov)](https://github.com/up1512001/kov/releases)
 
 [Website](https://trykov.dev) · [Documentation](https://trykov.dev/docs) · [Discord](https://discord.gg/kov)
