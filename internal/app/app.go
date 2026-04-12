@@ -320,30 +320,16 @@ func (a *App) runInteractive(cmd *cobra.Command) error {
 	// Build provider chain
 	providers := buildProviders(cfg)
 	if len(providers) == 0 {
-		// No providers — show setup guidance
-		fmt.Println(a.banner())
-		fmt.Println("  No providers configured.")
-		fmt.Println()
-		if len(cfg.DetectedCLIs) > 0 {
-			fmt.Println("  Detected CLI tools on your system:")
-			for _, cli := range cfg.DetectedCLIs {
-				fmt.Printf("    ✓ %s at %s", cli.Name, cli.Path)
-				if cli.Version != "" {
-					fmt.Printf(" (%s)", cli.Version)
-				}
-				fmt.Println()
-			}
-			fmt.Println()
-			fmt.Println("  These tools use OAuth — KOV needs an explicit API key.")
+		// No providers — run setup wizard
+		wizardCfg, err := runSetupWizard()
+		if err != nil {
+			return nil
 		}
-		fmt.Println()
-		fmt.Println("  Set up a provider:")
-		fmt.Println("    export ANTHROPIC_API_KEY=sk-ant-...  # Get from console.anthropic.com/settings/keys")
-		fmt.Println("    export OPENAI_API_KEY=sk-...          # Get from platform.openai.com/api-keys")
-		fmt.Println("    export GEMINI_API_KEY=...             # Get from aistudio.google.com/apikey")
-		fmt.Println()
-		fmt.Println("  Or run: kov setup")
-		return nil
+		cfg = wizardCfg
+		providers = buildProviders(cfg)
+		if len(providers) == 0 {
+			return nil
+		}
 	}
 
 	// Initialize DB
@@ -809,59 +795,8 @@ func (a *App) buildSetupCmd() *cobra.Command {
 		Long: `Set up your AI provider for KOV. This guides you through
 configuring an API key so KOV can connect to your preferred model.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := a.config.Get()
-			if err != nil {
-				return fmt.Errorf("loading config: %w", err)
-			}
-
-			fmt.Println(a.banner())
-
-			// Show detected CLI tools
-			if len(cfg.DetectedCLIs) > 0 {
-				fmt.Println("  Detected CLI tools:")
-				for _, cli := range cfg.DetectedCLIs {
-					fmt.Printf("    ✓ %s at %s", cli.Name, cli.Path)
-					if cli.Version != "" {
-						fmt.Printf(" (%s)", cli.Version)
-					}
-					fmt.Println()
-				}
-				fmt.Println()
-				fmt.Println("  Note: Claude Code and Codex use OAuth. KOV needs its own API key.")
-				fmt.Println()
-			}
-
-			// Show current providers
-			available := cfg.GetAvailableProviders()
-			if len(available) > 0 {
-				fmt.Printf("  Already configured: %s\n\n", strings.Join(available, ", "))
-			}
-
-			fmt.Println("  To add a provider, set one of these environment variables:")
-			fmt.Println()
-			fmt.Println("    Anthropic (recommended):")
-			fmt.Println("      export ANTHROPIC_API_KEY=sk-ant-...")
-			fmt.Println("      Get yours at: console.anthropic.com/settings/keys")
-			fmt.Println()
-			fmt.Println("    OpenAI:")
-			fmt.Println("      export OPENAI_API_KEY=sk-...")
-			fmt.Println("      Get yours at: platform.openai.com/api-keys")
-			fmt.Println()
-			fmt.Println("    Google:")
-			fmt.Println("      export GEMINI_API_KEY=...")
-			fmt.Println("      Get yours at: aistudio.google.com/apikey")
-			fmt.Println()
-			fmt.Println("    Ollama (local, free):")
-			fmt.Println("      Install from: ollama.com")
-			fmt.Println("      KOV auto-detects Ollama when it's running.")
-			fmt.Println()
-			fmt.Println("  Or add to ~/.config/kov/config.yaml:")
-			fmt.Println("    providers:")
-			fmt.Println("      anthropic:")
-			fmt.Println("        apiKey: sk-ant-...")
-			fmt.Println()
-			fmt.Println("  Then run: kov")
-			return nil
+			_, err := runSetupWizard()
+			return err
 		},
 	}
 }

@@ -214,15 +214,23 @@ func TestGetAvailableProviders_Empty(t *testing.T) {
 	}
 }
 
-func TestGetAvailableProviders_OnlyOllama(t *testing.T) {
+func TestGetAvailableProviders_OllamaRequiresHealthCheck(t *testing.T) {
 	cfg := Defaults()
 	cfg.Providers = ProvidersConfig{
 		Ollama: &OllamaConfig{URL: "http://localhost:11434"},
 	}
 
+	// Ollama is configured but not running — should NOT show as available
 	providers := cfg.GetAvailableProviders()
-	if len(providers) != 1 {
-		t.Errorf("expected 1 provider, got %d", len(providers))
+	if isOllamaRunning() {
+		// If Ollama happens to be running, it should show
+		if len(providers) != 1 {
+			t.Errorf("expected 1 provider (ollama running), got %d", len(providers))
+		}
+	} else {
+		if len(providers) != 0 {
+			t.Errorf("expected 0 providers (ollama not running), got %d", len(providers))
+		}
 	}
 }
 

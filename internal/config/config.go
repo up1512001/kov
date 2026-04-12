@@ -1,13 +1,10 @@
 package config
 
 import (
-	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/viper"
 )
@@ -137,29 +134,12 @@ func (c *Config) resolveAPIKeys() {
 	}
 
 	// Auto-detect Ollama only if not explicitly configured and actually running
-	if c.Providers.Ollama == nil && isOllamaReachable("http://localhost:11434") {
+	if c.Providers.Ollama == nil && isOllamaRunning() {
 		c.Providers.Ollama = &OllamaConfig{
 			URL:   "http://localhost:11434",
 			Model: "qwen3:8b",
 		}
 	}
-}
-
-// isOllamaReachable checks if Ollama is actually running at the given URL.
-func isOllamaReachable(baseURL string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/tags", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
 }
 
 // defaultDataDir returns the default data storage directory.
@@ -175,7 +155,9 @@ func defaultDataDir() string {
 	return filepath.Join(home, ".local", "share", "kov")
 }
 
-// GetAvailableProviders returns the IDs of providers that have API keys configured.
+// GetAvailableProviders returns the IDs of providers that are actually usable.
+// For cloud providers, this means having an API key configured.
+// For Ollama, this means the service is actually running (health check).
 func (c *Config) GetAvailableProviders() []string {
 	var providers []string
 	if c.Providers.Anthropic != nil && c.Providers.Anthropic.APIKey != "" {
@@ -187,8 +169,11 @@ func (c *Config) GetAvailableProviders() []string {
 	if c.Providers.Google != nil && c.Providers.Google.APIKey != "" {
 		providers = append(providers, "google")
 	}
+	// Ollama: only report as available if configured AND confirmed running
 	if c.Providers.Ollama != nil && c.Providers.Ollama.URL != "" {
-		providers = append(providers, "ollama")
+		if isOllamaRunning() {
+			providers = append(providers, "ollama")
+		}
 	}
 	return providers
 }

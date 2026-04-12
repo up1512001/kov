@@ -9,7 +9,11 @@ func Defaults() *Config {
 		Model:       "claude-sonnet-4-20250514",
 		Provider:    "anthropic",
 		Permissions: "confirm",
-		Providers: ProvidersConfig{},
+		Providers: ProvidersConfig{
+			// All providers are nil by default.
+			// They are populated from env vars, config files, or auto-detection.
+			// Ollama is NOT hardcoded — it's only added when confirmed running.
+		},
 		Resilience: ResilienceConfig{
 			Checkpoint:       true,
 			Failover:         true,

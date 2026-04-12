@@ -6,6 +6,8 @@ import (
 )
 
 // buildProviders creates providers from config, in failover order.
+// Only providers that are actually configured (with API keys or confirmed running)
+// are included. Ollama is NOT added blindly — it must be explicitly configured.
 func buildProviders(cfg *config.Config) []provider.Provider {
 	var providers []provider.Provider
 
@@ -47,11 +49,17 @@ func buildProviders(cfg *config.Config) []provider.Provider {
 				))
 			}
 		case "ollama":
-			if cfg.Providers.Ollama != nil && cfg.Providers.Ollama.URL != "" {
-				providers = append(providers, provider.NewOllamaProvider(
-					cfg.Providers.Ollama.URL,
-					cfg.Providers.Ollama.Model,
-				))
+			// Only add Ollama if explicitly configured (no longer blindly added)
+			if cfg.Providers.Ollama != nil {
+				host := cfg.Providers.Ollama.URL
+				model := cfg.Providers.Ollama.Model
+				if host == "" {
+					host = "http://localhost:11434"
+				}
+				if model == "" {
+					model = "qwen3:8b"
+				}
+				providers = append(providers, provider.NewOllamaProvider(host, model))
 			}
 		}
 	}
