@@ -43,6 +43,7 @@ type Agent struct {
 	onToolCall   func(name string, args string)
 	onToolResult func(name string, result string, err error)
 	onStatus     func(status string)
+	onWindowFill func(fill tokens.WindowFill)
 }
 
 // AgentConfig holds agent behavior settings.
@@ -119,6 +120,11 @@ func (a *Agent) SetCallbacks(
 	a.onToolCall = onToolCall
 	a.onToolResult = onToolResult
 	a.onStatus = onStatus
+}
+
+// SetWindowFillCallback sets the callback for context window fill updates.
+func (a *Agent) SetWindowFillCallback(fn func(tokens.WindowFill)) {
+	a.onWindowFill = fn
 }
 
 // Run executes the agent loop for a given prompt.
@@ -421,7 +427,7 @@ func (a *Agent) buildMessages(ctx context.Context) ([]provider.Message, error) {
 		messages = append(messages, msg)
 	}
 
-	// Auto-compact if conversation exceeds context window
+	// Build token-counted messages for window tracking
 	tokenMsgs := make([]tokens.MessageTokens, len(messages))
 	for i, m := range messages {
 		tokenMsgs[i] = tokens.MessageTokens{
@@ -431,12 +437,24 @@ func (a *Agent) buildMessages(ctx context.Context) ([]provider.Message, error) {
 		}
 	}
 
-	if a.compactor.NeedsCompaction(tokenMsgs) {
-		a.logger.Info("compacting conversation",
+	// Check context window fill and report to UI
+	fill := a.compactor.CheckFill(tokenMsgs)
+	if a.onWindowFill != nil {
+		a.onWindowFill(fill)
+	}
+
+	// Proactive compaction: compact at 90% fill instead of waiting for 100%
+	if fill.ShouldCompact || fill.NeedsCompaction {
+		a.logger.Info("proactive compaction triggered",
 			slog.Int("messages_before", len(messages)),
+			slog.Float64("fill_percent", fill.FillPercent*100),
 			slog.Int("budget", a.compactor.Budget()))
 
-		compacted := a.compactor.Compact(tokenMsgs)
+		compacted, didCompact := a.compactor.CompactProactive(tokenMsgs)
+		if !didCompact {
+			// Fall back to hard compaction if proactive didn't trigger
+			compacted = a.compactor.Compact(tokenMsgs)
+		}
 
 		// Rebuild messages from compacted tokens
 		newMessages := make([]provider.Message, len(compacted))
@@ -448,9 +466,27 @@ func (a *Agent) buildMessages(ctx context.Context) ([]provider.Message, error) {
 		}
 		messages = newMessages
 
+		// Report updated fill after compaction
+		newTokenMsgs := make([]tokens.MessageTokens, len(messages))
+		for i, m := range messages {
+			newTokenMsgs[i] = tokens.MessageTokens{
+				Role:    m.Role,
+				Content: m.Content,
+				Tokens:  estimateTokens(m.Content),
+			}
+		}
+		newFill := a.compactor.CheckFill(newTokenMsgs)
+		if a.onWindowFill != nil {
+			a.onWindowFill(newFill)
+		}
+
+		iterationsLeft := a.compactor.EstimateIterationsUntilFull()
 		a.logger.Info("compaction complete",
-			slog.Int("messages_after", len(messages)))
-		a.emit("📦 Conversation compacted to fit context window")
+			slog.Int("messages_after", len(messages)),
+			slog.Float64("fill_after", newFill.FillPercent*100),
+			slog.Int("estimated_iterations_left", iterationsLeft))
+		a.emit(fmt.Sprintf("Context compacted: %.0f%% -> %.0f%% window used (%d messages kept)",
+			fill.FillPercent*100, newFill.FillPercent*100, len(messages)))
 	}
 
 	return messages, nil

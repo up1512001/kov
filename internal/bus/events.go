@@ -110,6 +110,28 @@ type LoopDetected struct {
 
 func (LoopDetected) eventMarker() {}
 
+// --- Rate Limit Events ---
+
+// RateLimitHit is emitted when a provider returns 429.
+type RateLimitHit struct {
+	SessionID  string
+	Provider   string
+	RetryAfter int // seconds until retry, 0 if unknown
+	Attempt    int // which retry attempt this is
+	Action     string // "retrying", "failover", "waiting"
+}
+
+func (RateLimitHit) eventMarker() {}
+
+// RateLimitCleared is emitted when a rate-limited provider becomes available again.
+type RateLimitCleared struct {
+	SessionID string
+	Provider  string
+	WaitedFor int // seconds waited
+}
+
+func (RateLimitCleared) eventMarker() {}
+
 // --- Cost Events ---
 
 // CostUpdated tracks spending for budget enforcement.

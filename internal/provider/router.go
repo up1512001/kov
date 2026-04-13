@@ -41,9 +41,12 @@ func DefaultRouterConfig() RouterConfig {
 }
 
 type providerHealth struct {
-	available    bool
-	lastCheck    time.Time
-	failureCount int
+	available      bool
+	lastCheck      time.Time
+	failureCount   int
+	rateLimited    bool
+	rateLimitUntil time.Time // when the rate limit expires
+	rateLimitHits  int       // total 429s seen
 }
 
 // NewRouter creates a router with the given failover chain.
@@ -147,10 +150,24 @@ func (r *Router) Stream(ctx context.Context, params ChatParams) (<-chan StreamEv
 
 		switch action {
 		case ActionRetry:
+			// Emit rate limit event for 429s during streaming
+			var pe *ProviderError
+			if asProviderError(err, &pe) && pe.StatusCode == 429 {
+				r.trackRateLimit(provider.ID(), delay)
+				if r.bus != nil {
+					r.bus.Publish(bus.RateLimitHit{
+						Provider:   provider.ID(),
+						RetryAfter: int(delay.Seconds()),
+						Attempt:    1,
+						Action:     "retrying",
+					})
+				}
+			}
 			// For streaming, retry once then failover
 			time.Sleep(delay)
 			ch, err = provider.Stream(ctx, params)
 			if err == nil {
+				r.clearRateLimit(provider.ID())
 				return ch, nil
 			}
 			r.markUnhealthy(provider.ID())
@@ -175,17 +192,38 @@ func (r *Router) Stream(ctx context.Context, params ChatParams) (<-chan StreamEv
 }
 
 // tryWithRetry attempts a Chat request with retry logic.
+// Emits RateLimitHit events so the TUI can inform the user.
 func (r *Router) tryWithRetry(ctx context.Context, provider Provider, params ChatParams) (*ChatResponse, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
 		resp, err := provider.Chat(ctx, params)
 		if err == nil {
+			// If we were rate-limited before, emit clearance
+			r.clearRateLimit(provider.ID())
 			return resp, nil
 		}
 
 		lastErr = err
 		action, delay := ClassifyError(err, attempt)
+
+		// Emit rate limit event on 429
+		var pe *ProviderError
+		if asProviderError(err, &pe) && pe.StatusCode == 429 {
+			r.trackRateLimit(provider.ID(), delay)
+			actionStr := "retrying"
+			if action == ActionFailover {
+				actionStr = "failover"
+			}
+			if r.bus != nil {
+				r.bus.Publish(bus.RateLimitHit{
+					Provider:   provider.ID(),
+					RetryAfter: int(delay.Seconds()),
+					Attempt:    attempt + 1,
+					Action:     actionStr,
+				})
+			}
+		}
 
 		if action != ActionRetry {
 			return nil, err
@@ -204,6 +242,58 @@ func (r *Router) tryWithRetry(ctx context.Context, provider Provider, params Cha
 	}
 
 	return nil, lastErr
+}
+
+// trackRateLimit records a rate limit window for a provider.
+func (r *Router) trackRateLimit(id string, retryAfter time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if h, ok := r.health[id]; ok {
+		h.rateLimited = true
+		h.rateLimitUntil = time.Now().Add(retryAfter)
+		h.rateLimitHits++
+	}
+}
+
+// clearRateLimit clears the rate limit state for a provider.
+func (r *Router) clearRateLimit(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if h, ok := r.health[id]; ok {
+		if h.rateLimited {
+			h.rateLimited = false
+			h.rateLimitUntil = time.Time{}
+			if r.bus != nil {
+				r.bus.Publish(bus.RateLimitCleared{
+					Provider: id,
+				})
+			}
+		}
+	}
+}
+
+// IsRateLimited returns true if the provider is currently rate-limited.
+func (r *Router) IsRateLimited(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	h, ok := r.health[id]
+	if !ok {
+		return false
+	}
+	return h.rateLimited && time.Now().Before(h.rateLimitUntil)
+}
+
+// RateLimitStatus returns rate limit info for all providers.
+func (r *Router) RateLimitStatus() map[string]time.Time {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	status := make(map[string]time.Time)
+	for id, h := range r.health {
+		if h.rateLimited && time.Now().Before(h.rateLimitUntil) {
+			status[id] = h.rateLimitUntil
+		}
+	}
+	return status
 }
 
 // isHealthy checks if a provider is currently considered healthy.
