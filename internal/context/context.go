@@ -19,13 +19,14 @@ const (
 
 // ProjectContext holds all project-level context for the LLM.
 type ProjectContext struct {
-	ProjectDir   string
-	Instructions string   // contents of KOV.md
-	RepoMap      string   // file tree
-	IgnorePatterns []string // .kovignore patterns
+	ProjectDir         string
+	Instructions       string   // contents of KOV.md or CLAUDE.md
+	AgentsInstructions string   // contents of AGENTS.md (OpenAI standard)
+	RepoMap            string   // file tree
+	IgnorePatterns     []string // .kovignore patterns
 }
 
-// LoadProjectContext loads KOV.md, .kovignore, and generates the repo map.
+// LoadProjectContext loads KOV.md, AGENTS.md, .kovignore, and generates the repo map.
 func LoadProjectContext(projectDir string) (*ProjectContext, error) {
 	ctx := &ProjectContext{
 		ProjectDir: projectDir,
@@ -34,8 +35,11 @@ func LoadProjectContext(projectDir string) (*ProjectContext, error) {
 	// Load .kovignore patterns
 	ctx.IgnorePatterns = loadIgnorePatterns(projectDir)
 
-	// Load KOV.md (project-specific instructions)
+	// Load KOV.md / CLAUDE.md (project-specific instructions)
 	ctx.Instructions = loadKovFile(projectDir)
+
+	// Load AGENTS.md (OpenAI-originated standard, adopted by 60K+ repos)
+	ctx.AgentsInstructions = loadAgentsFile(projectDir)
 
 	// Generate repo map (file tree)
 	ctx.RepoMap = generateRepoMap(projectDir, ctx.IgnorePatterns)
@@ -49,6 +53,10 @@ func (pc *ProjectContext) ToSystemContext() string {
 
 	if pc.Instructions != "" {
 		parts = append(parts, fmt.Sprintf("## Project Instructions (KOV.md)\n\n%s", pc.Instructions))
+	}
+
+	if pc.AgentsInstructions != "" {
+		parts = append(parts, fmt.Sprintf("## Agent Instructions (AGENTS.md)\n\n%s", pc.AgentsInstructions))
 	}
 
 	if pc.RepoMap != "" {
@@ -78,6 +86,29 @@ func loadKovFile(projectDir string) string {
 		}
 		content := string(data)
 		// Enforce size limit
+		if len(content) > maxKovFileSize {
+			content = content[:maxKovFileSize] + "\n\n[... truncated at 32KB ...]"
+		}
+		return content
+	}
+
+	return ""
+}
+
+// loadAgentsFile reads the AGENTS.md file (OpenAI-originated standard, adopted by 60K+ repos).
+// This provides AI agent-specific instructions for the project.
+func loadAgentsFile(projectDir string) string {
+	candidates := []string{
+		filepath.Join(projectDir, "AGENTS.md"),
+		filepath.Join(projectDir, ".github", "AGENTS.md"),
+	}
+
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		content := string(data)
 		if len(content) > maxKovFileSize {
 			content = content[:maxKovFileSize] + "\n\n[... truncated at 32KB ...]"
 		}

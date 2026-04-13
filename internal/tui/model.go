@@ -48,6 +48,21 @@ type PermissionMsg struct {
 // CancelMsg signals the current agent run should be cancelled.
 type CancelMsg struct{}
 
+// WindowFillMsg updates the context window fill display.
+type WindowFillMsg struct {
+	FillPercent     float64
+	UsedTokens      int
+	BudgetTokens    int
+	RemainingTokens int
+}
+
+// RateLimitMsg signals a rate limit was hit.
+type RateLimitMsg struct {
+	Provider   string
+	RetryAfter int // seconds until retry
+	Action     string // "waiting", "failover", "paused"
+}
+
 // ChatMessage represents a rendered conversation turn.
 type ChatMessage struct {
 	Role    string // "user" or "assistant"
@@ -82,6 +97,14 @@ type Model struct {
 
 	// Permission
 	pendingPerm *PermissionMsg
+
+	// Context window fill tracking
+	windowFill  float64 // 0.0 to 1.0
+	windowUsed  int     // tokens used
+	windowTotal int     // total budget
+
+	// Rate limit info
+	rateLimitMsg string
 
 	// Done
 	done   bool
@@ -217,6 +240,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PermissionMsg:
 		m.pendingPerm = &msg
+		return m, nil
+
+	case WindowFillMsg:
+		m.windowFill = msg.FillPercent
+		m.windowUsed = msg.UsedTokens
+		m.windowTotal = msg.BudgetTokens
+		return m, nil
+
+	case RateLimitMsg:
+		m.rateLimitMsg = fmt.Sprintf("Rate limited on %s — %s (retry in %ds)", msg.Provider, msg.Action, msg.RetryAfter)
 		return m, nil
 	}
 
@@ -481,12 +514,32 @@ func (m Model) viewInteractive() string {
 	sb.WriteString(m.renderer.RenderDivider())
 	sb.WriteString("\n")
 
-	// Build status bar with shortcuts hint
+	// Build status bar with context window fill and shortcuts
 	statusParts := []string{
 		m.renderer.theme.ModeStyle.Render(m.mode),
 		lipgloss.NewStyle().Foreground(m.renderer.theme.Muted).Render(m.model),
 		m.renderer.RenderCost(m.cost),
 	}
+
+	// Context window fill indicator
+	if m.windowTotal > 0 {
+		fillPct := m.windowFill * 100
+		fillColor := m.renderer.theme.Success
+		if fillPct >= 90 {
+			fillColor = lipgloss.Color("#F87171") // red
+		} else if fillPct >= 70 {
+			fillColor = lipgloss.Color("#FBBF24") // yellow
+		}
+		windowStr := fmt.Sprintf("ctx: %.0f%%", fillPct)
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(fillColor).Render(windowStr))
+	}
+
+	// Rate limit warning
+	if m.rateLimitMsg != "" {
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Render(m.rateLimitMsg))
+		sb.WriteString("\n")
+	}
+
 	shortcuts := lipgloss.NewStyle().Foreground(m.renderer.theme.Muted).
 		Render("ctrl+c quit | /help commands | esc cancel")
 

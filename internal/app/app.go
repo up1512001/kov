@@ -17,9 +17,12 @@ import (
 	"github.com/up1512001/kov/internal/bus"
 	"github.com/up1512001/kov/internal/config"
 	"github.com/up1512001/kov/internal/db"
+	"github.com/up1512001/kov/internal/mcp"
+	"github.com/up1512001/kov/internal/pipe"
 	"github.com/up1512001/kov/internal/provider"
 	"github.com/up1512001/kov/internal/resilience"
 	"github.com/up1512001/kov/internal/session"
+	"github.com/up1512001/kov/internal/tokens"
 	"github.com/up1512001/kov/internal/tools"
 	"github.com/up1512001/kov/internal/tmux"
 	"github.com/up1512001/kov/internal/tui"
@@ -157,12 +160,18 @@ func (a *App) runRoot(cmd *cobra.Command, args []string) error {
 		return tmux.AttachSession(sessionName)
 	}
 
+	mode, _ := cmd.Flags().GetString("mode")
+
+	// Pipe mode: read from stdin, output JSON
+	if mode == "pipe" {
+		return a.runPipe(cmd)
+	}
+
 	if len(args) == 0 {
 		return a.runInteractive(cmd)
 	}
 
 	prompt := strings.Join(args, " ")
-	mode, _ := cmd.Flags().GetString("mode")
 	modelFlag, _ := cmd.Flags().GetString("model")
 	budgetFlag, _ := cmd.Flags().GetFloat64("budget")
 	verbose, _ := cmd.Flags().GetBool("verbose")
@@ -211,8 +220,14 @@ func (a *App) runRoot(cmd *cobra.Command, args []string) error {
 	// Get project directory
 	projectDir, _ := os.Getwd()
 
-	// Initialize tools
+	// Initialize tools (built-in + MCP servers)
 	toolRegistry := tools.DefaultRegistry(projectDir)
+	mcpClients := a.loadMCPTools(cfg, toolRegistry)
+	defer func() {
+		for _, c := range mcpClients {
+			c.Close()
+		}
+	}()
 
 	// Initialize resilience engine
 	engine := resilience.NewEngine(database, a.bus, a.logger, resilience.EngineConfig{
@@ -252,36 +267,51 @@ func (a *App) runRoot(cmd *cobra.Command, args []string) error {
 	agentCfg.VerifyCommand = cfg.Verify.Command
 	agentCfg.ProjectDir = projectDir
 
-	ag := agent.New(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg)
+	// Standard callbacks
+	permFn := func(toolName, desc string) bool {
+		fmt.Printf("🔐 Allow %s? [y/N] ", desc)
+		var response string
+		fmt.Scanln(&response)
+		return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+	}
+	tokenFn := func(token string) { fmt.Print(token) }
+	thinkFn := func(token string) {}
+	toolCallFn := func(name, args string) { fmt.Printf("\n⚙️  %s\n", name) }
+	toolResultFn := func(name, result string, err error) {
+		if err != nil {
+			fmt.Printf("   ❌ %s: %s\n", name, err)
+		} else {
+			fmt.Printf("   ✅ %s\n", name)
+		}
+	}
+	statusFn := func(status string) { fmt.Println(status) }
 
-	// Set callbacks for terminal output
-	ag.SetCallbacks(
-		func(toolName, desc string) bool {
-			fmt.Printf("🔐 Allow %s? [y/N] ", desc)
-			var response string
-			fmt.Scanln(&response)
-			return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
-		},
-		func(token string) { fmt.Print(token) },          // onToken
-		func(token string) { /* thinking — hide for now */ }, // onThinking
-		func(name, args string) {
-			fmt.Printf("\n⚙️  %s\n", name)
-		},
-		func(name, result string, err error) {
-			if err != nil {
-				fmt.Printf("   ❌ %s: %s\n", name, err)
-			} else {
-				fmt.Printf("   ✅ %s\n", name)
-			}
-		},
-		func(status string) { fmt.Println(status) },
-	)
-
-	// Run agent
+	// Run agent — architect mode uses two-phase runner
 	fmt.Printf("🔨 [%s mode] %s\n\n", mode, truncate(prompt, 120))
-	if err := ag.Run(cmd.Context(), sessionID, prompt); err != nil {
-		fmt.Printf("\n❌ %s\n", err)
-		return err
+
+	if mode == "architect" {
+		planModel, editModel := model, model
+		if cfg.Modes.Architect != nil {
+			if cfg.Modes.Architect.PlanModel != "" {
+				planModel = cfg.Modes.Architect.PlanModel
+			}
+			if cfg.Modes.Architect.EditModel != "" {
+				editModel = cfg.Modes.Architect.EditModel
+			}
+		}
+		ar := agent.NewArchitectRunner(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg, planModel, editModel)
+		ar.SetCallbacks(permFn, tokenFn, thinkFn, toolCallFn, toolResultFn, statusFn)
+		if err := ar.Run(cmd.Context(), sessionID, prompt); err != nil {
+			fmt.Printf("\n❌ %s\n", err)
+			return err
+		}
+	} else {
+		ag := agent.New(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg)
+		ag.SetCallbacks(permFn, tokenFn, thinkFn, toolCallFn, toolResultFn, statusFn)
+		if err := ag.Run(cmd.Context(), sessionID, prompt); err != nil {
+			fmt.Printf("\n❌ %s\n", err)
+			return err
+		}
 	}
 
 	// Print summary
@@ -348,6 +378,12 @@ func (a *App) runInteractive(cmd *cobra.Command) error {
 
 	projectDir, _ := os.Getwd()
 	toolRegistry := tools.DefaultRegistry(projectDir)
+	mcpClients := a.loadMCPTools(cfg, toolRegistry)
+	defer func() {
+		for _, c := range mcpClients {
+			c.Close()
+		}
+	}()
 
 	engine := resilience.NewEngine(database, a.bus, a.logger, resilience.EngineConfig{
 		CheckpointEnabled: cfg.Resilience.Checkpoint,
@@ -379,6 +415,116 @@ func (a *App) runInteractive(cmd *cobra.Command) error {
 
 	close(promptCh)
 	return nil
+}
+
+// runPipe runs KOV in pipe mode — reads JSON from stdin, runs agent, outputs JSON to stdout.
+// This is the CI/CD integration mode: echo '{"prompt":"fix the bug"}' | kov --mode pipe
+func (a *App) runPipe(cmd *cobra.Command) error {
+	req, err := pipe.ReadInput()
+	if err != nil {
+		return pipe.WriteError(err.Error())
+	}
+
+	cfg, err := a.config.Get()
+	if err != nil {
+		return pipe.WriteError(fmt.Sprintf("loading config: %s", err))
+	}
+
+	// Allow pipe request to override mode/model
+	mode := "code"
+	if req.Mode != "" {
+		mode = req.Mode
+	}
+	model := cfg.Model
+	if req.Model != "" {
+		model = req.Model
+	}
+
+	// Initialize subsystems
+	dbPath := cfg.DataDir + "/kov.db"
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return pipe.WriteError(fmt.Sprintf("creating data dir: %s", err))
+	}
+	database, err := db.Open(dbPath, a.logger)
+	if err != nil {
+		return pipe.WriteError(fmt.Sprintf("opening database: %s", err))
+	}
+	defer database.Close()
+
+	providers := buildProviders(cfg)
+	if len(providers) == 0 {
+		return pipe.WriteError("no providers configured")
+	}
+
+	router := provider.NewRouter(providers, a.bus, a.logger, provider.DefaultRouterConfig())
+	defer router.Close()
+
+	projectDir, _ := os.Getwd()
+	toolRegistry := tools.DefaultRegistry(projectDir)
+
+	budget := cfg.Cost.BudgetPerSession
+	engine := resilience.NewEngine(database, a.bus, a.logger, resilience.EngineConfig{
+		CheckpointEnabled: cfg.Resilience.Checkpoint,
+		LoopThreshold:     cfg.Resilience.LoopDetection.Threshold,
+		BudgetPerSession:  budget,
+		BudgetWarnAt:      cfg.Cost.WarnAt,
+		MaxFixRetries:     cfg.Verify.MaxFixRetries,
+	})
+
+	sessionID, err := database.CreateSession(cmd.Context(), &db.Session{
+		ProjectDir: projectDir,
+		Mode:       mode,
+		Provider:   cfg.Provider,
+		Model:      model,
+		State:      "idle",
+		Prompt:     req.Prompt,
+	})
+	if err != nil {
+		return pipe.WriteError(fmt.Sprintf("creating session: %s", err))
+	}
+
+	agentCfg := agent.DefaultAgentConfig()
+	agentCfg.Mode = mode
+	agentCfg.Model = model
+	agentCfg.Permissions = "yolo" // pipe mode auto-approves all tools
+	agentCfg.VerifyEnabled = cfg.Verify.Enabled
+	agentCfg.VerifyCommand = cfg.Verify.Command
+	agentCfg.ProjectDir = projectDir
+
+	ag := agent.New(database, router, toolRegistry, engine, a.bus, a.logger, agentCfg)
+
+	// Collect output silently
+	var contentBuilder strings.Builder
+	var toolCallCount int
+	ag.SetCallbacks(
+		func(name, desc string) bool { return true }, // auto-approve
+		func(token string) { contentBuilder.WriteString(token) },
+		func(token string) {},
+		func(name, args string) { toolCallCount++ },
+		func(name, result string, err error) {},
+		func(status string) {},
+	)
+
+	runErr := ag.Run(cmd.Context(), sessionID, req.Prompt)
+	sessionCost, _ := database.GetSessionCost(cmd.Context(), sessionID)
+
+	if runErr != nil {
+		return pipe.WriteResponse(&pipe.Response{
+			Success: false,
+			Content: contentBuilder.String(),
+			Error:   runErr.Error(),
+			Cost:    sessionCost,
+			Model:   model,
+		})
+	}
+
+	return pipe.WriteResponse(&pipe.Response{
+		Success:   true,
+		Content:   contentBuilder.String(),
+		ToolCalls: toolCallCount,
+		Cost:      sessionCost,
+		Model:     model,
+	})
 }
 
 // agentRequest represents a prompt submitted from the interactive TUI.
@@ -448,6 +594,14 @@ func (a *App) runAgentForPrompt(
 		},
 		func(status string) { p.Send(tui.StatusMsg{Status: status}) },
 	)
+	ag.SetWindowFillCallback(func(fill tokens.WindowFill) {
+		p.Send(tui.WindowFillMsg{
+			FillPercent:     fill.FillPercent,
+			UsedTokens:      fill.UsedTokens,
+			BudgetTokens:    fill.BudgetTokens,
+			RemainingTokens: fill.RemainingTokens,
+		})
+	})
 
 	if err := ag.Run(req.ctx, sessionID, req.prompt); err != nil {
 		if req.ctx.Err() != nil {
@@ -812,6 +966,26 @@ func (a *App) banner() string {
   ╚═╝  ╚═╝ ╚═════╝   ╚═══╝  %s
   Indestructible AI coding   trykov.dev
 `, a.build.Version)
+}
+
+// loadMCPTools registers tools from configured MCP servers into the registry.
+// Returns the MCP clients for cleanup.
+func (a *App) loadMCPTools(cfg *config.Config, registry *tools.Registry) []*mcp.Client {
+	if len(cfg.MCPServers) == 0 {
+		return nil
+	}
+
+	serverConfigs := make(map[string]mcp.ServerConfig, len(cfg.MCPServers))
+	for name, sc := range cfg.MCPServers {
+		serverConfigs[name] = mcp.ServerConfig{
+			Name:    name,
+			Command: sc.Command,
+			Args:    sc.Args,
+			Env:     sc.Env,
+		}
+	}
+
+	return tools.RegisterMCPTools(registry, serverConfigs, a.logger)
 }
 
 // truncate shortens a string to maxLen characters.
